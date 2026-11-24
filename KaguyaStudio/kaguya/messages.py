@@ -47,6 +47,8 @@ def classify_message(text: str, default_target: str = "equipe") -> Intent:
                 interrupt = True
             else:
                 parallel = True
+                value = value[m.end():].strip()
+                break  # the remaining lines are '@agent: subtask' entries
             value = value[m.end():].strip()
             continue
         break
