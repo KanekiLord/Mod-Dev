@@ -78,7 +78,7 @@ class StudioTests(unittest.TestCase):
         self.assertEqual((self.repo/'CLAUDE.md').read_text(), 'Instrucoes existentes')
 
     def test_catalog_contains_72_names(self):
-        catalog=Path(__file__).resolve().parent.parent/'catalogo'/'agentes.json'
+        catalog=Path(__file__).resolve().parent.parent.parent/'catalogo'/'agentes.json'
         entries=json.loads(catalog.read_text(encoding='utf-8'))
         self.assertEqual(len(entries),72)
         self.assertEqual(len({e['nome'] for e in entries}),72)

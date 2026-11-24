@@ -5,8 +5,8 @@ from pathlib import Path
 from mascote import sprite_path, label_for_state, expression_names, animation_sprite, MascotSettings, state_for_agent_status
 
 ROOT=Path(__file__).resolve().parents[1]
-CLAUDE=ROOT/'mascotes'/'claude'
-KAGUYA=ROOT/'mascotes'/'kaguya'
+CLAUDE=ROOT.parent/'assets'/'mascots'/'claude'
+KAGUYA=ROOT.parent/'assets'/'mascots'/'kaguya'
 
 class ClaudeMascotTests(unittest.TestCase):
     def test_preserves_kaguya_and_loads_all_nine_claude_expressions(self):

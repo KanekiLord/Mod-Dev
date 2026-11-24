@@ -21,7 +21,7 @@ from mascote import MascotPresenter, state_for_status, state_for_agent_status
 
 ROOT=Path(__file__).resolve().parent
 HOME=Path(os.environ.get('LOCALAPPDATA',str(Path.home()/'.kaguya-studio')))/'KaguyaStudioV3'
-CATALOG=ROOT/'catalogo'/'agentes.json'
+CATALOG=ROOT.parent/'catalogo'/'agentes.json'
 BG='#100B1B'; SURFACE='#1E162D'; PANEL='#2A1D3B'; FG='#F8EFF7'; MUTED='#AFA3C1'
 BLUE='#C09CF9'; ORANGE='#E8AA7F'; GREEN='#72D8AB'; RED='#EF859B'; GOLD='#F2C99F'; BORDER='#433152'
 
@@ -40,9 +40,9 @@ class Studio(tk.Tk):
         self.worker=None
         self.pid=None
         self.last_output=''
-        self.mascot=MascotPresenter(self,ROOT/'mascotes'/'kaguya',HOME/'mascote.json',
+        self.mascot=MascotPresenter(self,ROOT.parent/'assets'/'mascots'/'kaguya',HOME/'mascote.json',
                                     self._quick_message,self._show_studio)
-        self.claude_mascot=MascotPresenter(self,ROOT/'mascotes'/'claude',
+        self.claude_mascot=MascotPresenter(self,ROOT.parent/'assets'/'mascots'/'claude',
             HOME/'mascote_claude.json',self._quick_message,self._show_studio,mascot_id='claude')
         self.mascots=[self.mascot,self.claude_mascot]
         self._style()
@@ -138,7 +138,7 @@ class Studio(tk.Tk):
         banner=tk.Canvas(self,height=82,highlightthickness=0,bd=0,bg='#140e20')
         banner.pack(side='top',fill='x')
         banner.pack_propagate(False)
-        art=ROOT/'assets'/'cabecalho_sakura.png'
+        art=ROOT/'cabecalho_sakura.png'
         self._banner_image=None
         if art.is_file():
             try:

@@ -6,7 +6,7 @@ except ImportError:
     Image=None  # Pillow is optional; installed sprites already cleaned
 
 ROOT=Path(__file__).resolve().parents[1]
-SPRITES=ROOT/'mascotes'/'kaguya'
+SPRITES=ROOT.parent/'assets'/'mascots'/'kaguya'
 @unittest.skipIf(Image is None, "Pillow optional necessário apenas para testes de imagem")
 class SpriteRepairTests(unittest.TestCase):
     def test_every_expression_has_real_transparent_corners(self):
