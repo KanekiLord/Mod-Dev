@@ -1,0 +1,56 @@
+[
+  {
+    "file": "claude_feminina_neutra.png",
+    "row": 1,
+    "col": 1,
+    "expression": "neutra"
+  },
+  {
+    "file": "claude_feminina_feliz.png",
+    "row": 1,
+    "col": 2,
+    "expression": "feliz"
+  },
+  {
+    "file": "claude_feminina_pensando.png",
+    "row": 1,
+    "col": 3,
+    "expression": "pensando"
+  },
+  {
+    "file": "claude_feminina_falando.png",
+    "row": 2,
+    "col": 1,
+    "expression": "falando"
+  },
+  {
+    "file": "claude_feminina_surpresa.png",
+    "row": 2,
+    "col": 2,
+    "expression": "surpresa"
+  },
+  {
+    "file": "claude_feminina_piscando.png",
+    "row": 2,
+    "col": 3,
+    "expression": "piscando"
+  },
+  {
+    "file": "claude_feminina_focada.png",
+    "row": 3,
+    "col": 1,
+    "expression": "focada"
+  },
+  {
+    "file": "claude_feminina_sucesso.png",
+    "row": 3,
+    "col": 2,
+    "expression": "sucesso"
+  },
+  {
+    "file": "claude_feminina_cafe.png",
+    "row": 3,
+    "col": 3,
+    "expression": "cafe"
+  }
+]

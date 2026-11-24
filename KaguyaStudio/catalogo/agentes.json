@@ -1,0 +1,506 @@
+[
+  {
+    "nome": "narutocd-coordenador",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "",
+    "funcao": "Recebe a tarefa, escolhe os agents e junta os resultados."
+  },
+  {
+    "nome": "narutocd-auxiliar-logs",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Lê o log de teste e extrai erros e marcas da sessão."
+  },
+  {
+    "nome": "narutocd-auxiliar-versao",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Confere se a versão do mod é a mesma em todos os arquivos."
+  },
+  {
+    "nome": "narutocd-auxiliar-planejamento",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Transforma pedidos em etapas pequenas, com teste de cada uma."
+  },
+  {
+    "nome": "narutocd-explorador",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Encontra onde uma classe ou mecânica é usada, sem alterar."
+  },
+  {
+    "nome": "narutocd-revisor",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Revisa alterações de código antes de dar por concluídas."
+  },
+  {
+    "nome": "narutocd-juiz",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Dá o veredito: aprovada, reprovada ou pendente."
+  },
+  {
+    "nome": "narutocd-registro",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Registra o que foi feito no segundo cérebro."
+  },
+  {
+    "nome": "narutocd-categorizador",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Põe área, tipo e estado nas notas do projeto."
+  },
+  {
+    "nome": "narutocd-integrador-cerebro",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Liga as notas do projeto aos arquivos de código."
+  },
+  {
+    "nome": "narutocd-organizador",
+    "projeto": "NarutoCD",
+    "grupo": "Coordenação",
+    "pai": "narutocd-coordenador",
+    "funcao": "Organiza a pasta do projeto. Só move com aprovação."
+  },
+  {
+    "nome": "narutocd-criacao-dev",
+    "projeto": "NarutoCD",
+    "grupo": "Criação de personagem",
+    "pai": "",
+    "funcao": "Implementa a tela de criação de personagem, uma etapa por vez."
+  },
+  {
+    "nome": "narutocd-criacao-visual",
+    "projeto": "NarutoCD",
+    "grupo": "Criação de personagem",
+    "pai": "",
+    "funcao": "Analisa capturas da criação e aponta problemas de layout."
+  },
+  {
+    "nome": "narutocd-criacao-fluxo",
+    "projeto": "NarutoCD",
+    "grupo": "Criação de personagem",
+    "pai": "",
+    "funcao": "Confere a ordem das telas e o envio ao servidor."
+  },
+  {
+    "nome": "narutocd-caca-erros-codigo",
+    "projeto": "NarutoCD",
+    "grupo": "Qualidade e dependências",
+    "pai": "",
+    "funcao": "Procura erros de lógica, nulos e uso de API errado. Não corrige."
+  },
+  {
+    "nome": "narutocd-caca-erros-dev",
+    "projeto": "NarutoCD",
+    "grupo": "Qualidade e dependências",
+    "pai": "",
+    "funcao": "Procura versões divergentes, configurações faltando e disco cheio."
+  },
+  {
+    "nome": "narutocd-deps-analista",
+    "projeto": "NarutoCD",
+    "grupo": "Qualidade e dependências",
+    "pai": "",
+    "funcao": "Lê os jars dos mods dependentes e diz como cada parte funciona."
+  },
+  {
+    "nome": "narutocd-deps-api",
+    "projeto": "NarutoCD",
+    "grupo": "Qualidade e dependências",
+    "pai": "",
+    "funcao": "Confere se cada uso de dependência existe na versão instalada."
+  },
+  {
+    "nome": "narutocd-curador-referencias",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "",
+    "funcao": "Organiza as referências das pesquisas e envia ao juiz."
+  },
+  {
+    "nome": "narutocd-juiz-referencias",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Julga licença, origem e relevância de cada referência."
+  },
+  {
+    "nome": "narutocd-pesquisa-mods",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa como desenvolver mods 1.7.10 com Forge."
+  },
+  {
+    "nome": "narutocd-pesquisa-paineis",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa telas e painéis de interface."
+  },
+  {
+    "nome": "narutocd-pesquisa-sons",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa sons e trilhas, conferindo a licença antes."
+  },
+  {
+    "nome": "narutocd-pesquisa-texturas",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa referências e técnicas de textura para o jogo."
+  },
+  {
+    "nome": "narutocd-pesquisa-entidades",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa mobs e NPCs com Forge e GeckoLib."
+  },
+  {
+    "nome": "narutocd-pesquisa-efeitos-vfx",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa partículas e efeitos visuais em 1.7.10."
+  },
+  {
+    "nome": "narutocd-pesquisa-referencias",
+    "projeto": "NarutoCD",
+    "grupo": "Pesquisa e referências",
+    "pai": "narutocd-curador-referencias",
+    "funcao": "Pesquisa referências visuais de jogos e mods ninja."
+  },
+  {
+    "nome": "narutocd-imagem-ia-prompt",
+    "projeto": "NarutoCD",
+    "grupo": "Imagens com IA",
+    "pai": "",
+    "funcao": "Escreve briefings para o gerador e confere o resultado."
+  },
+  {
+    "nome": "narutocd-imagem-ia-gerador",
+    "projeto": "NarutoCD",
+    "grupo": "Imagens com IA",
+    "pai": "",
+    "funcao": "Gera imagem com o Higgsfield. Pede aprovação do custo antes."
+  },
+  {
+    "nome": "narutocd-imagem-ia-gravyx",
+    "projeto": "NarutoCD",
+    "grupo": "Imagens com IA",
+    "pai": "",
+    "funcao": "Gera imagem pelo Gravyx. Confere saldo e pede aprovação."
+  },
+  {
+    "nome": "narutocd-imagem-ia-gratis",
+    "projeto": "NarutoCD",
+    "grupo": "Imagens com IA",
+    "pai": "",
+    "funcao": "Gera rascunho pelo Pollinations, sem custo e com marca d'água."
+  },
+  {
+    "nome": "narutocd-imagem-ia-processador",
+    "projeto": "NarutoCD",
+    "grupo": "Imagens com IA",
+    "pai": "",
+    "funcao": "Recorta, aplica transparência e ajusta tamanho e paleta."
+  },
+  {
+    "nome": "blockbench-planejador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Monta o plano da peça: etapas, responsável e critério de aceite."
+  },
+  {
+    "nome": "blockbench-planejador-auxiliar",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Diz qual agent age agora no fluxo de uma peça."
+  },
+  {
+    "nome": "blockbench-planejador-itens",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Planeja itens e armas, com portão de aprovação."
+  },
+  {
+    "nome": "blockbench-planejador-entidades",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Planeja mobs e NPCs do Bedrock."
+  },
+  {
+    "nome": "blockbench-planejador-comidas",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Planeja comidas com ícone 2D ou modelo pequeno."
+  },
+  {
+    "nome": "blockbench-planejador-efeitos",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Planejamento",
+    "pai": "",
+    "funcao": "Planeja efeitos visuais e sonoros de Bedrock."
+  },
+  {
+    "nome": "blockbench-pesquisador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Pesquisa Blockbench, Bedrock e GeckoLib e grava resumos próprios."
+  },
+  {
+    "nome": "blockbench-buscador-referencias",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Procura referências visuais e tutoriais de pintura e modelagem."
+  },
+  {
+    "nome": "blockbench-aprendiz-modelagem",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Aprende modelagem e textura e grava resumos próprios."
+  },
+  {
+    "nome": "blockbench-aprendiz-texturas",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Estuda paleta, sombra e costuras dos mods de referência."
+  },
+  {
+    "nome": "blockbench-aprendiz-pintura",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Estuda técnicas e ferramentas de pintura para o texturizador."
+  },
+  {
+    "nome": "blockbench-referencias",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Mede armaduras de referência: espessura, UV, pivôs e cubos."
+  },
+  {
+    "nome": "blockbench-pesquisador-segundo-cerebro",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Pesquisa e aprendizado",
+    "pai": "",
+    "funcao": "Procura no Segundo Cérebro o material útil para a modelagem."
+  },
+  {
+    "nome": "blockbench-modelador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Modelagem (G1)",
+    "pai": "",
+    "funcao": "Modela a roupa no Blockbench, com UV e nomes de ossos armor*."
+  },
+  {
+    "nome": "blockbench-revisor",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Modelagem (G1)",
+    "pai": "",
+    "funcao": "Revisa interseções, espessura, UV e cubos de 0 a 1 pixel."
+  },
+  {
+    "nome": "blockbench-coordenador-textura",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Textura (G2)",
+    "pai": "",
+    "funcao": "Prepara a pintura: resolução, paleta, ordem e template UV."
+  },
+  {
+    "nome": "blockbench-texturizador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Textura (G2)",
+    "pai": "blockbench-coordenador-textura",
+    "funcao": "Pinta a textura da peça com paleta e sombra."
+  },
+  {
+    "nome": "blockbench-editor-externo",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Textura (G2)",
+    "pai": "blockbench-texturizador",
+    "funcao": "Faz passadas em PNG com Pillow e GIMP, sem tocar na geometria."
+  },
+  {
+    "nome": "blockbench-resolucao",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Textura (G2)",
+    "pai": "",
+    "funcao": "Escolhe a resolução da textura antes de pintar."
+  },
+  {
+    "nome": "blockbench-comparador-exemplos",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Comparação e fotos",
+    "pai": "",
+    "funcao": "Compara lado, frente e proporção com o exemplo aprovado."
+  },
+  {
+    "nome": "blockbench-analisador-elementos",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Comparação e fotos",
+    "pai": "",
+    "funcao": "Compara peça a peça, osso a osso, com o exemplo."
+  },
+  {
+    "nome": "blockbench-analisador-textura",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Comparação e fotos",
+    "pai": "",
+    "funcao": "Varre a textura pixel a pixel e aponta cada problema."
+  },
+  {
+    "nome": "blockbench-mostrador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Comparação e fotos",
+    "pai": "",
+    "funcao": "Gera as fotos de projeção e o pacote para os juízes."
+  },
+  {
+    "nome": "blockbench-juiz",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Portão de aprovação (G3)",
+    "pai": "",
+    "funcao": "Veredito geral da peça. Só aprova com foto lado a lado."
+  },
+  {
+    "nome": "blockbench-juiz-geometria",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Portão de aprovação (G3)",
+    "pai": "blockbench-juiz",
+    "funcao": "Aprova ou reprova só a geometria."
+  },
+  {
+    "nome": "blockbench-juiz-textura",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Portão de aprovação (G3)",
+    "pai": "blockbench-juiz",
+    "funcao": "Aprova ou reprova só a textura."
+  },
+  {
+    "nome": "blockbench-juiz-processo",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Portão de aprovação (G3)",
+    "pai": "blockbench-juiz",
+    "funcao": "Confere se o fluxo obrigatório foi seguido."
+  },
+  {
+    "nome": "blockbench-juiz-solucoes",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Portão de aprovação (G3)",
+    "pai": "blockbench-juiz",
+    "funcao": "Transforma reprovações em tarefas para cada agent."
+  },
+  {
+    "nome": "blockbench-sc-gestor",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Segundo Cérebro (roupas)",
+    "pai": "",
+    "funcao": "Leva ao projeto de roupas as informações novas do vault."
+  },
+  {
+    "nome": "blockbench-sc-organizador",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Segundo Cérebro (roupas)",
+    "pai": "",
+    "funcao": "Organiza o vault e cria funções novas, registrando cada mudança."
+  },
+  {
+    "nome": "blockbench-sc-registro",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Segundo Cérebro (roupas)",
+    "pai": "",
+    "funcao": "Registra erros, progresso e acertos das roupas."
+  },
+  {
+    "nome": "blockbench-sc-relator",
+    "projeto": "Roupas (Blockbench)",
+    "grupo": "Segundo Cérebro (roupas)",
+    "pai": "",
+    "funcao": "Lê os registros e diz o que deu certo e o que deu errado."
+  },
+  {
+    "nome": "sc-memoria",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Grava decisões, fatos e relatórios na memória do vault."
+  },
+  {
+    "nome": "sc-tarefas",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Gerencia as tarefas em tasks/todo.md."
+  },
+  {
+    "nome": "sc-categorizador",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Propõe tags, tipo e pasta para as notas."
+  },
+  {
+    "nome": "sc-canvas",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Cria canvas do Obsidian para visualizar estruturas."
+  },
+  {
+    "nome": "sc-planilha",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Cria e confere planilhas CSV e XLSX."
+  },
+  {
+    "nome": "sc-plugins-obsidian",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Avalia plugins da comunidade do Obsidian. Não instala."
+  },
+  {
+    "nome": "sc-sugerir-plugins",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Sugere a melhor ferramenta para uma tarefa do vault."
+  },
+  {
+    "nome": "sc-usar-plugins",
+    "projeto": "Segundo Cérebro",
+    "grupo": "Vault geral",
+    "pai": "",
+    "funcao": "Usa os plugins já instalados para tarefas do vault."
+  }
+]

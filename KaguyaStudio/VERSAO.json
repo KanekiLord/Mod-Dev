@@ -1,0 +1,13 @@
+{
+  "produto": "Kaguya Studio",
+  "versao": "3.4.0",
+  "data": "2026-11-23",
+  "linguagem": "Python 3.10+",
+  "interface": "Tkinter",
+  "servidores_externos_adicionais": false,
+  "api_keys_exigidas": false,
+  "estado": "36 testes locais, incluindo interface visual Xvfb e dois mascotes independentes; Windows/CLIs reais pendentes",
+  "version": "3.4.0",
+  "mascots": "Kaguya (Codex): 18 expressões + 10 quadros opcionais; Claude Code: 9 expressões originais 128x128, painel e janela flutuante independentes",
+  "redesign": "Interface V3.3 preservada, com dois retratos e controles para mascotes Codex e Claude Code"
+}
