@@ -1,0 +1,72 @@
+[
+  {
+    "id": "saudacao",
+    "text": "Olá. Eu sou Kaguya, e estou pronta para ajudar com o seu projeto.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "saudacao_2",
+    "text": "Oi! Miwa aqui. Já terminei a primeira etapa e encontrei dois pontos que merecem atenção.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "naturalidade",
+    "text": "Na verdade, podemos tentar de outra maneira. Talvez fique mais simples e rápido.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "questionamento",
+    "text": "Você prefere que Kaguya explique primeiro, ou que mostre o código funcionando?",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "pontuacao",
+    "text": "Certo... Mas antes, confira isto: o erro aparece somente ao iniciar o programa!",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "numero_data",
+    "text": "O relatório foi gerado em 25 de novembro de 2026, às 14 horas e 35 minutos.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "siglas",
+    "text": "A GPU tem oito gigabytes de VRAM, mas o uso real depende da implementação.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "tecnologia",
+    "text": "Precisamos verificar o PyTorch, a versão do CUDA e o uso de memória no Windows 11.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "codigo",
+    "text": "O arquivo main.py chama a função voice_synthesize e recebe uma exceção de tempo limite.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "silabas",
+    "text": "Paralelepípedo, extraordinariamente, otorrinolaringologista e interdisciplinaridade.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "ingles_misto",
+    "text": "Abra o Kaguya Studio, clique em Settings e selecione a opção de Text to Speech.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "emocao_sutil",
+    "text": "Conseguimos! O teste passou. Ainda precisamos confirmar o comportamento no seu computador.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "alerta",
+    "text": "A geração de voz foi interrompida. O áudio foi cancelado e o volume da música foi restaurado.",
+    "locale": "pt-BR"
+  },
+  {
+    "id": "longo",
+    "text": "A primeira etapa terminou com sucesso. Agora vamos comparar os resultados, conferir as dependências, revisar os testes e escolher a melhor opção para sua máquina. Caso um modelo esteja lento, o sistema poderá utilizar uma alternativa mais leve, sem perder a configuração da personagem.",
+    "locale": "pt-BR"
+  }
+]

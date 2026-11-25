@@ -53,8 +53,10 @@ class SpeechQueue:
     """One synthesis worker + one playback worker, connected by a small queue."""
 
     def __init__(self, synth: Callable[[str, str], tuple], play: Callable[[object, int, threading.Event], None],
-                 on_state: Callable[[str, str], None] | None = None):
-        self._synth, self._play, self._on_state = synth, play, on_state
+                 on_state: Callable[[str, str], None] | None = None, on_error: Callable[[str], None] | None = None):
+        self._synth, self._play, self._on_state, self._on_error = synth, play, on_state, on_error
+        self._env: list[float] = []          # loudness envelope (20 ms frames) of the sentence being played
+        self._env_t0 = 0.0
         self._texts: "queue.Queue[tuple[int, str, str] | None]" = queue.Queue()
         self._audio: "queue.Queue[tuple[int, object, int, str] | None]" = queue.Queue(maxsize=3)
         self._gen = 0
@@ -84,6 +86,15 @@ class SpeechQueue:
     def busy(self) -> bool:
         return self.active or not self._texts.empty() or not self._audio.empty()
 
+    def level(self) -> float:
+        """Loudness (0..1) of the audio being heard right now — drives the mascot's mouth."""
+        import time as _t
+        env = self._env
+        if not env or not self.active:
+            return 0.0
+        i = int((_t.monotonic() - self._env_t0) / 0.02)
+        return env[i] if 0 <= i < len(env) else 0.0
+
     def _set(self, active: bool, voice: str):
         if self.active != active:
             self.active = active
@@ -100,7 +111,9 @@ class SpeechQueue:
                 continue
             try:
                 audio, sr = self._synth(text, voice)
-            except Exception:
+            except Exception as exc:   # never silent: the UI shows it (and nothing stale plays later)
+                if self._on_error:
+                    self._on_error(f"A voz falhou: {exc}")
                 continue
             if gen == self._gen and audio is not None and len(audio):
                 self._audio.put((gen, audio, sr, voice))
@@ -114,13 +127,34 @@ class SpeechQueue:
             if gen != self._gen:
                 continue
             self._stop.clear()
+            self._env = envelope(audio, sr)
+            import time as _t
+            self._env_t0 = _t.monotonic()
             self._set(True, voice)
             try:
                 self._play(audio, sr, self._stop)
-            except Exception:
-                pass
+            except Exception as exc:
+                if self._on_error:
+                    self._on_error(f"Não foi possível tocar a voz: {exc}")
+            self._env = []
             if self._audio.empty() and self._texts.empty():
                 self._set(False, voice)
+
+
+def envelope(audio, sr: int, frame_s: float = 0.02) -> list[float]:
+    """Normalised RMS per 20 ms frame (0..1)."""
+    try:
+        import numpy as np
+        a = np.asarray(audio, dtype="float32").reshape(-1)
+        n = max(1, int(sr * frame_s))
+        frames = len(a) // n
+        if frames == 0:
+            return []
+        rms = np.sqrt(np.mean(a[: frames * n].reshape(frames, n) ** 2, axis=1))
+        peak = float(rms.max()) or 1.0
+        return [float(x) / peak for x in rms]
+    except Exception:
+        return []
 
 
 def sounddevice_player(device_getter: Callable[[], int | None]):

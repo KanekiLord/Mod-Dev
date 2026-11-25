@@ -30,7 +30,7 @@ from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
 NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("music", "music", "Kaguya Music"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
-       ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
+       ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("voices", "volume", "Vozes"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
 
@@ -142,6 +142,8 @@ class MainWindow(QMainWindow):
         self.music_dock = MusicDock(self, self.music)
         self._build()
         self.voice = VoiceController(self)
+        for m in self.mascots.values():
+            m.level_source = self.voice.level
         self._codex_busy = False
         self.audio_in, self.audio_out = [], []
         self._audio_checked = False
@@ -228,7 +230,9 @@ class MainWindow(QMainWindow):
         self.home = HomePage(self)
         from .page_music import MusicPage
         self.music_page = MusicPage(self)
-        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page,
+        from .page_voices import VoicesPage
+        self.voices_page = VoicesPage(self)
+        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page, "voices": self.voices_page,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)

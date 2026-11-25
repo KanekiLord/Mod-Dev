@@ -111,6 +111,7 @@ class Mascot(QObject):
         self._talk_timer = QTimer(self)
         self._talk_timer.setSingleShot(True)
         self._talk_timer.timeout.connect(self._talk_step)
+        self.level_source = None     # callable → loudness 0..1 of the voice being heard (set by the main window)
 
     def _load_prefs(self) -> MascotPrefs:
         try:
@@ -175,6 +176,15 @@ class Mascot(QObject):
     def _talk_step(self):
         if self.state != "speaking":
             self._stop_talk()
+            return
+        level = self.level_source() if self.level_source else None
+        if level is not None and level < 0.08 and self._talk_seq:
+            # a pause in the real audio: close the mouth (first frame) and wait, instead of moving on its own
+            self.talk_frame = self._talk_seq[0][0]
+            self._talk_timer.start(60)
+            self.changed.emit()
+            if self.window:
+                self.window.update()
             return
         if self._talk_pos >= len(self._talk_seq):  # one pass done: next gesture
             self._talk_seq, self._talk_pos = self.talk_sequence(), 0

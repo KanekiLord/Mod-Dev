@@ -142,7 +142,8 @@ class UiSmoke(UiBase):
 
     def test_all_pages_render_without_projects(self):
         w = self.window()
-        for key in ("home", "chat", "webchats", "queue", "memory", "agents", "persona", "usage", "diag", "settings"):
+        for key in ("home", "chat", "webchats", "music", "queue", "memory", "agents", "persona", "voices", "usage",
+                    "diag", "settings"):
             w.go(key)
             self.app.processEvents()
             self.assertFalse(w.grab().isNull())
@@ -603,6 +604,27 @@ class MusicUi(UiBase):
         w.go("music")
         self.assertEqual(w.music_page.table.rowCount(), 2)
         dock.set_pinned(False)
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class VoicesUi(UiBase):
+    def test_voices_page_profiles_and_honest_engine_list(self):
+        from kaguya.voice.engines import load_profile
+        w = self.window()
+        w.go("voices")
+        page = w.voices_page
+        names = [page.engines_table.item(r, 0).text() for r in range(page.engines_table.rowCount())]
+        self.assertTrue(any("Qwen3" in n for n in names) and any("Chatterbox" in n for n in names))
+        qrow = names.index(next(n for n in names if "Qwen3" in n))
+        self.assertIn("autorização", page.engines_table.item(qrow, 1).text())
+        miwa = page.editors["claude"]
+        heavy = miwa.engine.findData("qwen3")
+        self.assertFalse(miwa.engine.model().item(heavy).isEnabled())       # cannot be picked before installing
+        miwa.style.setCurrentIndex(miwa.style.findData("animado"))
+        miwa.volume.setValue(55)
+        p = load_profile(self.store, "claude")
+        self.assertEqual((p.style, p.volume), ("animado", 55))
+        self.assertEqual(load_profile(self.store, "codex").style, "natural")   # Kaguya untouched
 
 
 def tearDownModule():

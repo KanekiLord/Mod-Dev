@@ -27,6 +27,20 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Vozes naturais — 5.2.0
+
+- `test_voices.py`: números e frases do benchmark do pacote falados corretamente; motores pesados nunca aparecem
+  como instalados; perfis independentes, migração da 4.x e valores limitados; volume por personagem aplicado; fallback
+  sem motor dá erro claro (bug encontrado pelo teste e corrigido); benchmark mede e **relata** erros; fila: silêncio
+  inicial → boca fechada, trecho alto → boca aberta; interrupção durante a síntese → o trecho atrasado **não toca**;
+  erro do motor chega à interface.
+- `test_ui_v4.py › VoicesUi`: lista honesta de motores (Qwen3/Chatterbox desabilitados até instalar), perfil da Miwa
+  salvo sem mexer na Kaguya.
+- **Real (Kokoro-82M ONNX, 12 frases pt-BR do pacote, CPU de 4 núcleos sem GPU)**: Kaguya RTF p50 1,249, TTFA p50
+  3,31 s / p95 6,05 s; Miwa (Animado 1,05×) RTF p50 1,271, TTFA p50 2,82 s / p95 5,43 s; 0 erros.
+- **Não feito**: Qwen3-TTS e Chatterbox (aguardando sua autorização para instalar); avaliação auditiva sua (A/B no app);
+  medição no seu PC/GPU.
+
 ## Etapa B — 5.1.0 (Kaguya Music)
 
 - `test_music.py`: varredura de pastas (ignora ocultas e não-áudio, sem duplicar), título/artista pelo nome do arquivo,

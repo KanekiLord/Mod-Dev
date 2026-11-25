@@ -1,5 +1,29 @@
 # Changelog
 
+## 5.2.0 — 25/11/2026 (pacote "Vozes naturais", etapas 1, 2 e 4)
+
+### Novo
+- **Página Vozes**: motores de voz com o **status real** deste PC (Kokoro-82M ONNX, vozes do Windows; Qwen3-TTS e
+  Chatterbox listados como "não instalado — precisa da sua autorização", com licença, tamanho e avisos — Chatterbox
+  está arquivado desde 08/2026). Nada é baixado sem você.
+- **Perfil de voz por personagem**, independente da personalidade: motor (automático/Kokoro/Windows), voz, estilo
+  (Natural, Suave, Animado, Formal), velocidade e **volume próprio**; "Ouvir Kaguya/Miwa" e Parar. Mudar a Miwa não
+  mexe na Kaguya. A voz escolhida na 4.x continua.
+- **Texto preparado para fala em pt-BR** sem mudar o chat: números por extenso (com "e" certo: "dois milhões e
+  quinhentos mil"), datas, horas, porcentagens, reais, ordinais, versões ("um ponto sete ponto dez"), unidades
+  (GB, ms…), siglas técnicas (GPU, VRAM, API…), nomes de arquivo ("main ponto pai"), identificadores de código e links.
+- **Benchmark real**: TTFA (até o primeiro áudio, sem a latência da placa de som), tempo de síntese, duração e RTF com
+  as frases de teste do pacote; p50/p95; resultados guardados no seu PC.
+- **Teste cego A/B**: duas vozes em ordem sorteada, você vota sem saber qual é qual; placar local.
+- **Boca guiada pelo áudio de verdade**: a mascote fecha a boca nas pausas da fala (energia do som tocando) e só
+  anima enquanto há voz; para junto com o áudio. (Não é sincronização por fonemas.)
+- Erros do motor de voz aparecem na tela (antes eram ignorados em silêncio); trecho atrasado nunca toca depois de
+  uma interrupção.
+- Amostras geradas localmente em `docs/amostras_voz/`.
+
+### Medido (servidor de nuvem de 4 núcleos, sem GPU — não é o seu PC)
+- Kokoro, 12 frases do pacote: **RTF p50 ≈ 1,25**, **TTFA p50 ≈ 3 s** (p95 ≈ 6 s), 0 erros.
+
 ## 5.1.0 — 25/11/2026 (Etapa B: Kaguya Music)
 
 ### Novo

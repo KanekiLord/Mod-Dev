@@ -148,8 +148,9 @@ class PersonaEditor(Card):
             val.setText(str(p.value(key)))
         self.extra.setPlainText(p.extra)
         from ..voice.neural import DEFAULT_PRESET
+        from ..voice.engines import load_profile
         self.voice.setCurrentIndex(max(0, self.voice.findData(
-            self.win.store.get_setting(f"voice.neural_{self.agent}", DEFAULT_PRESET.get(self.agent, "dora")))))
+            load_profile(self.win.store, self.agent).voice or DEFAULT_PRESET.get(self.agent, "dora"))))
         self.variant.setCurrentIndex(max(0, self.variant.findData(self.win.mascots[self.agent].prefs.variant)))
         override = persona.has_project_override(self.win.store, self.agent, pid)
         self.scope_note.setText("Ajuste só deste projeto." if override else
@@ -202,7 +203,10 @@ class PersonaEditor(Card):
 
     def _voice_changed(self, *_):
         if not self._loading:
-            self.win.store.set_setting(f"voice.neural_{self.agent}", self.voice.currentData())
+            from ..voice.engines import load_profile, save_profile
+            p = load_profile(self.win.store, self.agent)
+            p.voice = self.voice.currentData()
+            save_profile(self.win.store, self.agent, p)
 
     def _variant_changed(self, *_):
         if not self._loading:

@@ -20,7 +20,9 @@ class VoiceController(QObject):
         self.transcriber: stt.Transcriber | None = None
         self._speaking_agent = None
         from ..voice.neural import NeuralVoices
+        from ..voice.engines import VoiceEngines
         self.neural = NeuralVoices(self.win.engine.home / "modelos")
+        self.engines = VoiceEngines(self.neural, self._windows_voice)
         self.queue = None   # SpeechQueue, created lazily (needs numpy/sounddevice)
 
     # ------------------------------------------------------------------ devices
@@ -53,6 +55,26 @@ class VoiceController(QObject):
             return st.get_setting(f"voice.neural_{agent}", DEFAULT_PRESET.get(agent, "dora"))
         return st.get_setting(f"voice.voice_{agent}", "") or st.get_setting("voice.tts_voice", "") or ""
 
+    def _windows_voice(self, agent: str) -> str:
+        st = self.win.store
+        return st.get_setting(f"voice.voice_{agent}", "") or st.get_setting("voice.tts_voice", "") or ""
+
+    def profile(self, agent: str):
+        from ..voice.engines import load_profile
+        p = load_profile(self.win.store, agent)
+        if p.engine == "auto" and self.win.store.get_setting("voice.engine", "auto") == "windows":
+            p.engine = "windows"   # the 4.x "Windows voice" choice keeps working
+        return p
+
+    def synthesize(self, text: str, agent: str):
+        """Normalised pt-BR text → (audio, sample rate, engine id) with the character's own voice profile."""
+        from ..voice.normalize import normalize
+        return self.engines.synth(normalize(text), self.profile(agent), agent if agent in ("codex", "claude") else "codex")
+
+    def level(self):
+        """Loudness of the voice being heard, or None when it cannot be measured (Windows voice player)."""
+        return self.queue.level() if (self.queue and self.queue.active) else None
+
     def _ensure_queue(self):
         from ..voice import devices as dv
         from ..voice.speech import SpeechQueue, sapi_synth, sounddevice_player
@@ -60,13 +82,15 @@ class VoiceController(QObject):
             return self.queue
 
         def synth(text, agent):
-            if self.engine_name() == "neural":
-                return self.neural.synth(text, self.voice_for(agent))
-            return sapi_synth(self.voice_for)(text, agent)
+            audio, sr, _engine = self.synthesize(text, agent)
+            return audio, sr
 
         def on_state(state, agent):
             self.win.bridge.call.emit(lambda: self._on_queue_state(state, agent))
-        self.queue = SpeechQueue(synth, sounddevice_player(self.output_index), on_state)
+
+        def on_error(msg):
+            self.win.bridge.call.emit(lambda: self.win.toast(msg))
+        self.queue = SpeechQueue(synth, sounddevice_player(self.output_index), on_state, on_error)
         return self.queue
 
     def _duck(self, on: bool):
