@@ -51,7 +51,7 @@ class LiveSession:
                  on_event: Callable[[dict], None], on_task: Callable[[str, str], None] | None = None,
                  input_device: int | None = None, wake: bool = False,
                  quick_transcribe: Callable[[np.ndarray], str] | None = None, follow_up_s: float = 12.0,
-                 local_command: Callable[[str], str | None] | None = None):
+                 local_command: Callable[[str], str | None] | None = None, noise: str = "off"):
         self.agent = agent
         self._make, self._transcribe = make_conversation, transcribe
         self._say, self._stop_speech, self._speech_busy = say, stop_speech, speech_busy
@@ -59,6 +59,10 @@ class LiveSession:
         self.input_device = input_device
         self.convs: dict[str, object] = {}
         self.vad = EnergyVAD()
+        # noise filter + neural speech detector (fan, wind on the microphone…); "off" keeps the raw signal
+        from ..voice.denoise import MicFrontEnd
+        self.front = MicFrontEnd(noise) if noise != "off" else None
+        self.noise_dropped = 0   # finished clips that held no speech (not transcribed)
         self.muted = False
         self.running = False
         self._utterances: "queue.Queue[np.ndarray | None]" = queue.Queue()
@@ -127,6 +131,8 @@ class LiveSession:
     def set_muted(self, muted: bool):
         self.muted = muted
         self.vad.reset()
+        if self.front is not None:
+            self.front.reset()
         self._state("muted" if muted else "listening")
 
     def barge_in(self):
@@ -173,11 +179,21 @@ class LiveSession:
         if self.muted:
             return
         self.vad.assistant_talking = self._speech_busy()
-        for kind, audio in self.vad.feed(frame16k):
+        prob = None
+        if self.front is not None:
+            frame16k, prob = self.front.process(frame16k)
+        for kind, audio in self.vad.feed(frame16k, prob):
             if kind == "start":
                 self.barge_in()
                 self._state("hearing")
             elif kind == "end" and audio is not None and len(audio) >= RATE * 0.35:
+                if self.front is not None and self.front.neural:
+                    from ..voice.denoise import has_speech
+                    if has_speech(audio) is False:     # only noise: never transcribed, never sent anywhere
+                        self.noise_dropped += 1
+                        self._emit({"type": "noise"})
+                        self._state("listening")
+                        continue
                 self._utterances.put(audio)
 
     # ------------------------------------------------------------------ brain

@@ -19,12 +19,14 @@ RATE = 16000
 class VADConfig:
     frame_ms: int = 30
     start_ms: int = 180          # speech must last this long to count
-    end_silence_ms: int = 750    # pause that ends the utterance
+    end_silence_ms: int = 850    # pause that ends the utterance (850: one sentence stays whole in fan noise)
     preroll_ms: int = 300
     max_utterance_s: float = 30.0
     min_level: float = 0.012     # absolute floor (RMS)
     ratio: float = 3.0           # speech = noise * ratio
     barge_ratio: float = 6.0     # stricter while the assistant talks
+    prob_start: float = 0.5      # with the neural detector: speech probability needed to count as voice
+    prob_keep: float = 0.2       # … and to keep an utterance going (hysteresis; measured with fan + wind)
 
 
 class EnergyVAD:
@@ -44,13 +46,18 @@ class EnergyVAD:
         ratio = self.cfg.barge_ratio if self.assistant_talking else self.cfg.ratio
         return max(self.cfg.min_level, self.noise * ratio)
 
-    def feed(self, frame: np.ndarray) -> list[tuple[str, np.ndarray | None]]:
-        """Returns events: ('start', None) and/or ('end', utterance_audio)."""
+    def feed(self, frame: np.ndarray, speech_prob: float | None = None) -> list[tuple[str, np.ndarray | None]]:
+        """Returns events: ('start', None) and/or ('end', utterance_audio).
+
+        ``speech_prob`` (0..1, from the neural detector) makes loud noise that is not a voice — a fan, wind on the
+        microphone, a door — count as silence."""
         frame = np.asarray(frame, dtype="float32").reshape(-1)
         rms = float(np.sqrt(np.mean(frame * frame))) if len(frame) else 0.0
         self.level = min(1.0, rms * 8)
         events = []
         loud = rms > self._threshold()
+        if speech_prob is not None:
+            loud = loud and speech_prob >= (self.cfg.prob_keep if self.speaking else self.cfg.prob_start)
         fms = self.cfg.frame_ms
         if not self.speaking:
             self._pre.append(frame)

@@ -641,6 +641,24 @@ class VoicesUi(UiBase):
         self.assertIsNone(page._installer)
 
 
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class NoiseUi(UiBase):
+    def test_noise_filter_setting_and_room_measurement(self):
+        from tests.test_denoise import fan, wind
+        w = self.window()
+        w.go("settings")
+        page = w.settings
+        self.assertEqual(page.noise_combo.currentData(), "normal")           # on by default
+        page.noise_combo.setCurrentIndex(page.noise_combo.findData("forte"))
+        self.assertEqual(self.store.get_setting("voice.noise"), "forte")
+        self.assertFalse(page.noise_raw.isEnabled())
+        page.measure_noise(audio=fan(5) + wind(5, -6, 12))
+        self.assertTrue(self.pump(lambda: page.noise_raw.isEnabled(), 30))
+        text = page.noise_result.text()
+        self.assertIn("dB a menos", text)
+        self.assertIn("vento", text)
+
+
 def tearDownModule():
     """Destroy every top-level window while QApplication still exists (Qt objects that survive until
     interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""

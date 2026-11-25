@@ -206,7 +206,12 @@ class VoiceController(QObject):
         model = self.win.store.get_setting("voice.model", "small")
         if self.transcriber is None or self.transcriber.model_name != model:
             self.transcriber = stt.Transcriber(self.win.engine.home / "modelos", model)
-        run_bg(lambda: self.transcriber.transcribe(audio), self._transcribed,
+        strength = self.win.store.get_setting("voice.noise", "normal")
+
+        def work():
+            from ..voice.denoise import denoise
+            return self.transcriber.transcribe(denoise(audio, strength))
+        run_bg(work, self._transcribed,
                lambda e, tb: self._transcribed("", str(e)))
 
     def _transcribed(self, text: str, error: str = ""):

@@ -596,6 +596,15 @@ class SettingsPage(QWidget):
         self.stt_model.setCurrentIndex(list(stt.MODELS).index(win.store.get_setting("voice.model", "small")))
         self.stt_model.currentIndexChanged.connect(lambda: win.store.set_setting("voice.model", self.stt_model.currentData()))
         vform.addRow("Modelo de transcrição", self.stt_model)
+        from ..voice.denoise import LABELS as NOISE_LABELS
+        self.noise_combo = QComboBox()
+        for key, text in NOISE_LABELS.items():
+            self.noise_combo.addItem(text, key)
+        self.noise_combo.setCurrentIndex(max(0, self.noise_combo.findData(win.store.get_setting("voice.noise", "normal"))))
+        self.noise_combo.setToolTip("Tira ventilador, vento no microfone, ar-condicionado e chiado, e só conta como fala "
+                                    "o que é voz de verdade. Vale para o Live, chamar pelo nome e o botão Falar.")
+        self.noise_combo.currentIndexChanged.connect(self._noise_changed)
+        vform.addRow("Filtro de ruído", self.noise_combo)
         self.mic_dev = QComboBox()
         self.out_dev = QComboBox()
         self.mic_dev.currentIndexChanged.connect(lambda: self._save_dev("input", self.mic_dev))
@@ -618,6 +627,23 @@ class SettingsPage(QWidget):
         self._filling = False
         vc.lay.addLayout(vform)
         vc.lay.addLayout(arow)
+        nrow = QHBoxLayout()
+        self.noise_test = button("Medir ruído do ambiente (5 s)", "gauge", tip="Fique em silêncio com o ventilador ligado")
+        self.noise_test.clicked.connect(self.measure_noise)
+        self.noise_raw = button("Ouvir sem filtro", "play", "ghost")
+        self.noise_clean = button("Ouvir com filtro", "play", "ghost")
+        self.noise_raw.clicked.connect(lambda: self._play_noise(False))
+        self.noise_clean.clicked.connect(lambda: self._play_noise(True))
+        for b in (self.noise_raw, self.noise_clean):
+            b.setEnabled(False)
+        for w in (self.noise_test, self.noise_raw, self.noise_clean):
+            nrow.addWidget(w)
+        nrow.addStretch(1)
+        vc.lay.addLayout(nrow)
+        self.noise_result = label("Com o ventilador ligado e sem falar, meça o ruído: o Studio mostra quanto o filtro "
+                                  "tira e se o vento está batendo no microfone.", "dim", wrap=True)
+        vc.lay.addWidget(self.noise_result)
+        self._noise_clip = None
         self.t_consent = Toggle("Autorizo baixar o modelo de transcrição escolhido (uma vez, fica no computador)",
                                 bool(win.store.get_setting("voice.model_consent", False)))
         self.t_consent.toggled.connect(lambda v: win.store.set_setting("voice.model_consent", v))
@@ -630,6 +656,7 @@ class SettingsPage(QWidget):
         mc = Card()
         mc.lay.addWidget(label("MASCOTES E MIGRAÇÃO", "section"))
         mrow = QHBoxLayout()
+        vrow = QHBoxLayout()   # visuals on their own row: one row was wider than the window
         for agent in ("codex", "claude"):
             b = button(f"{AGENT[agent]['mascot']} flutuante", "window", tip="Mostrar/ocultar na área de trabalho")
             b.clicked.connect(lambda _=False, a=agent: win.mascots[a].toggle_window())
@@ -641,8 +668,8 @@ class SettingsPage(QWidget):
             if key == km.prefs.variant:
                 self.kaguya_variant.setCurrentIndex(self.kaguya_variant.count() - 1)
         self.kaguya_variant.currentIndexChanged.connect(lambda: km.set_variant(self.kaguya_variant.currentData()))
-        mrow.addWidget(label("Visual da Kaguya", "dim"))
-        mrow.addWidget(self.kaguya_variant)
+        vrow.addWidget(label("Visual da Kaguya", "dim"))
+        vrow.addWidget(self.kaguya_variant)
         self.miwa_variant = QComboBox()
         mm = win.mascots["claude"]
         for key, text in mm.variants():
@@ -650,13 +677,15 @@ class SettingsPage(QWidget):
             if key == mm.prefs.variant:
                 self.miwa_variant.setCurrentIndex(self.miwa_variant.count() - 1)
         self.miwa_variant.currentIndexChanged.connect(lambda: mm.set_variant(self.miwa_variant.currentData()))
-        mrow.addWidget(label("da Miwa", "dim"))
-        mrow.addWidget(self.miwa_variant)
+        vrow.addWidget(label("Visual da Miwa", "dim"))
+        vrow.addWidget(self.miwa_variant)
         imp = button("Importar dados da V3.x", "download", "ghost", "Copia projetos e fila da V3 (o banco antigo não é alterado)")
         imp.clicked.connect(self.import_v3)
         mrow.addWidget(imp)
         mrow.addStretch(1)
         mc.lay.addLayout(mrow)
+        vrow.addStretch(1)
+        mc.lay.addLayout(vrow)
         self.t_talk = Toggle("Boca e gestos animados enquanto elas falam",
                              all(m.prefs.talk for m in win.mascots.values()))
         self.t_talk.toggled.connect(lambda on: [setattr(m.prefs, "talk", on) or m.save() for m in win.mascots.values()])
@@ -770,6 +799,64 @@ class SettingsPage(QWidget):
             return
         self.win.store.set_setting(f"voice.{kind}_name", combo.currentData())
         self.win.refresh_devices_ui()
+
+    def _noise_changed(self, *_):
+        key = self.noise_combo.currentData()
+        self.win.store.set_setting("voice.noise", key)
+        restart = []
+        if getattr(self.win, "live_session", None) is not None:
+            restart.append("o Live")
+        if getattr(getattr(self.win, "wake", None), "session", None) is not None:
+            restart.append("a escuta por nome")
+        self.win.toast(f"Filtro de ruído: {self.noise_combo.currentText()}."
+                       + (f" Vale ao reabrir {' e '.join(restart)}." if restart else ""))
+
+    def measure_noise(self, audio=None):
+        """Records 5 s of the room (or analyses ``audio``, for tests) and shows what the filter does."""
+        from ..voice.denoise import analyze
+        strength = self.noise_combo.currentData()
+        self.noise_test.setEnabled(False)
+        self.noise_test.setText("Medindo… fique em silêncio")
+
+        def work():
+            clip = audio
+            if clip is None:
+                import sounddevice as sd
+                from ..voice.devices import resample
+                dev = self.win.voice.input_index()
+                info = sd.query_devices(dev, "input")
+                rate = int(info.get("default_samplerate") or 16000)
+                rec = sd.rec(int(5 * rate), samplerate=rate, channels=1, dtype="float32", device=dev)
+                sd.wait()
+                clip = resample(rec[:, 0], rate, 16000)
+            res = analyze(clip, strength)
+            res["raw"] = clip
+            return res
+
+        def done(res):
+            self.noise_test.setEnabled(True)
+            self.noise_test.setText("Medir ruído do ambiente (5 s)")
+            self.noise_result.setText(res["text"])
+            self._noise_clip = (res["raw"], res["clean"])
+            for b in (self.noise_raw, self.noise_clean):
+                b.setEnabled(True)
+
+        def fail(exc, _tb):
+            self.noise_test.setEnabled(True)
+            self.noise_test.setText("Medir ruído do ambiente (5 s)")
+            self.noise_result.setText(f"Não foi possível medir: {exc}")
+        run_bg(work, done, fail)
+
+    def _play_noise(self, filtered: bool):
+        if not self._noise_clip:
+            return
+        clip = self._noise_clip[1 if filtered else 0]
+        q = self.win.voice._ensure_queue()
+        if q is None:
+            self.win.toast("Sem saída de áudio nesta cópia.")
+            return
+        self.win.voice.stop_speaking()
+        q._audio.put((q._gen, clip, 16000, "codex"))
 
     def test_mic(self):
         from ..voice import devices as dv

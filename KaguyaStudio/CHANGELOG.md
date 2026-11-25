@@ -1,5 +1,29 @@
 # Changelog
 
+## 5.4.0 — 25/11/2026 (filtro de ruído: ventilador e vento no microfone)
+
+### Novo
+- **Filtro de ruído no microfone**, ligado por padrão no Live, no "chamar pelo nome" e no botão Falar
+  (Configurações › Voz › Filtro de ruído: Desligado / Normal / Forte). Três camadas, tudo local e sem download:
+  1. **Redução de ruído contínua**: aprende o som do ambiente nos momentos de silêncio e tira o zumbido do
+     ventilador, ar-condicionado e chiado; corta o ronco grave (< 110–160 Hz); detecta **rajadas de vento** batendo
+     no microfone e abafa os graves enquanto duram. Atraso ≈ 32 ms, ≈ 1% de um núcleo de CPU.
+  2. **Detector de fala neural (Silero VAD)**, que já vinha junto com a transcrição: só conta como fala o que é
+     voz de verdade — ventilador e vento não "começam a ouvir" nem interrompem a Kaguya/Miwa falando.
+  3. **Checagem final** antes de transcrever: trecho sem voz é descartado (nunca vai para a IA), e frases que o
+     Whisper inventa no ruído ("Legendas pela comunidade Amara.org", "Obrigado por assistir"…) são removidas.
+- **Medir ruído do ambiente (5 s)**: mostra o ruído antes/depois do filtro em dB, quantos falsos inícios de fala
+  aconteceriam com e sem filtro, se há vento no microfone, e dicas; **Ouvir sem filtro / com filtro**.
+
+### Medido (ventilador + rajadas de vento simulados, com as amostras de fala do Studio e o Whisper real)
+- Só ruído, 60 s: o sistema antigo disparava e, com ruído forte, **nunca encerrava a escuta** (nada era
+  transcrito); o novo: **0 disparos falsos** nos três níveis.
+- Fala no meio do ruído: antigo 0% transcrito; novo **91–98% das palavras certas**, cada frase inteira num trecho só.
+- Ajustes medidos: pausa que encerra a fala 850 ms (era 750) para a frase não se partir no ruído.
+
+### Corrigido
+- Configurações tinha rolagem lateral em janelas de até ≈ 1.600 px (a linha dos mascotes era larga demais).
+
 ## 5.3.0 — 25/11/2026 (pacote "Vozes naturais", etapa 3: motor pesado)
 
 ### Novo

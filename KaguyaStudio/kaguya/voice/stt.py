@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib.util
 from pathlib import Path
+import re
 import threading
 import time
 
@@ -88,6 +89,29 @@ class Recorder:
         return resample(np.concatenate(self._chunks)[:, 0], self.rate, SAMPLE_RATE)
 
 
+# what Whisper "hears" in fan noise, wind or silence (it learned these from subtitled videos)
+HALLUCINATIONS = re.compile(
+    r"(legendas? (pela|por)|amara\.org|obrigad[oa] por assistir|inscreva-se|se inscreva|deixe (seu|o seu) like|"
+    r"ative o sininho|tchau,? tchau|^\W*(\.|…)+\W*$|^\W*m[uú]sica\W*$|^\W*\[.*\]\W*$)", re.I)
+
+
+def clean_segments(segments) -> str:
+    """Join Whisper segments, dropping the ones the model itself marks as non-speech and known hallucinations."""
+    out = []
+    for seg in segments:
+        text = (getattr(seg, "text", "") or "").strip()
+        if not text:
+            continue
+        nsp = getattr(seg, "no_speech_prob", 0.0) or 0.0
+        logp = getattr(seg, "avg_logprob", 0.0) or 0.0
+        if nsp > 0.6 and logp < -0.7:
+            continue
+        if HALLUCINATIONS.search(text):
+            continue
+        out.append(text)
+    return " ".join(out).strip()
+
+
 class Transcriber:
     _lock = threading.Lock()
 
@@ -109,4 +133,4 @@ class Transcriber:
             return ""
         segments, _info = self.load().transcribe(audio, language="pt", vad_filter=True, beam_size=1,
                                                  initial_prompt=prompt)
-        return " ".join(s.text.strip() for s in segments).strip()
+        return clean_segments(segments)

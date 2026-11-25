@@ -1093,7 +1093,8 @@ class MainWindow(QMainWindow):
             transcribe=lambda audio: self.voice.transcriber.transcribe(audio, NAMES_PROMPT),
             say=self.voice.say, stop_speech=self.voice.stop_speaking, speech_busy=lambda: bool(q and q.busy),
             on_event=on_event, on_task=on_task, input_device=self.voice.input_index(),
-            local_command=lambda text: self.bridge_call(self.music_command, text))
+            local_command=lambda text: self.bridge_call(self.music_command, text),
+            noise=self.store.get_setting("voice.noise", "normal"))
         try:
             self.live_session.start()
         except Exception as exc:

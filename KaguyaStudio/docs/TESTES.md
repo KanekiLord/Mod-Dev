@@ -27,6 +27,18 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Filtro de ruído — 5.4.0
+
+- `test_denoise.py`: processamento em pedaços de qualquer tamanho dá o mesmo resultado; ventilador cai ≥ 12 dB e um
+  som que começa no meio é preservado; rajadas detectadas como vento (ventilador sozinho não); filtro do botão Falar;
+  Silero separa a fala real (amostra do Studio) de ventilador + vento; **sessão Live sem filtro é enganada pelo
+  ruído (o problema relatado) e com filtro não começa a ouvir nunca**; fala dentro do ruído chega inteira, num trecho;
+  alucinações do Whisper removidas; medição do ambiente com números reais e aviso de vento.
+- `test_ui_v4.py › NoiseUi`: filtro ligado por padrão, troca salva, medição mostra o resultado e libera "Ouvir".
+- **Simulação com Whisper real** (ruído sintético: ventilador com pás a 58 Hz + ruído rosa, rajadas graves com
+  saturação da cápsula; fala = amostras do Studio a -20 dBFS): ver CHANGELOG 5.4.0.
+- **Não feito**: teste com o seu ventilador e o seu microfone — use "Medir ruído do ambiente" e me diga o resultado.
+
 ## Vozes naturais — 5.3.0 (Qwen3-TTS opcional)
 
 - `test_voices.py › HeavyInstall` (uv falso + modo de teste do processo de voz, sem download): instalação completa →
