@@ -117,6 +117,7 @@ class Pill(QLabel):
                            f" border: 1px solid rgba({border.red()},{border.green()},{border.blue()},{border.alpha()});"
                            f" border-radius: 10px; padding: 2px 9px; font-size: 8pt; font-weight: 600; }}")
         self.setText(text)
+        self.setVisible(bool(text))
 
 
 class Dot(QWidget):

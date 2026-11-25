@@ -6,7 +6,7 @@ import time
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QScrollArea,
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QSizePolicy, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QScrollArea,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import VERSION
@@ -244,8 +244,9 @@ class MainWindow(QMainWindow):
         sc.setWidgetResizable(True)
         sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
+        inner.setMinimumWidth(0)
         lay = QVBoxLayout(inner)
-        lay.setContentsMargins(12, 14, 12, 14)
+        lay.setContentsMargins(12, 14, 14, 14)
         lay.setSpacing(12)
         duo = QHBoxLayout()
         duo.setSpacing(8)
@@ -300,7 +301,7 @@ class MainWindow(QMainWindow):
             r.addWidget(icon_label(AGENT[a]["icon"], AGENT[a]["color"], 16))
             meter = Meter(AGENT[a]["color"])
             txt = label("indisponível", "dim")
-            txt.setMinimumWidth(110)
+            txt.setMinimumWidth(84)
             txt.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             r.addWidget(meter, 1)
             r.addWidget(txt)
@@ -313,8 +314,10 @@ class MainWindow(QMainWindow):
         # vault
         vc = Card(padding=12, pattern=True)
         vh = QHBoxLayout()
-        vh.addWidget(icon_label("brain", C["violet"], 18))
-        vh.addWidget(label("Segundo Cérebro", "h2"))
+        vh.addWidget(icon_label("brain", C["violet"], 16))
+        vtitle = label("SEGUNDO CÉREBRO", "section")
+        vtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        vh.addWidget(vtitle, 1)
         vh.addStretch(1)
         self.v_state = Pill("", C["muted"])
         vh.addWidget(self.v_state)
@@ -507,7 +510,7 @@ class MainWindow(QMainWindow):
             _p, items = read_todo(Path(vault))
             self.v_stats["todo"].setText(str(sum(1 for i in items if not i.done)) if _p else "—")
         else:
-            self.v_state.set("não vinculado", C["dim"])
+            self.v_state.set("sem vault", C["dim"])
             for n in self.v_stats.values():
                 n.setText("—")
 
