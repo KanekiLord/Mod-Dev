@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 import time
 import traceback
@@ -19,7 +20,9 @@ from typing import Callable
 from ..appdirs import CATALOG, data_dir
 from ..cli import discovery
 from .. import checkpoint
-from ..cli.commands import RunOptions
+from ..desktop import control as desktop_control
+from ..desktop.server import server_command
+from ..cli.commands import RunOptions, claude_desktop_config
 from ..cli.discovery import Capabilities, Diagnosis
 from ..cli.events import AgentEvent, RunResult
 from ..cli.runner import run_agent
@@ -37,6 +40,8 @@ Listener = Callable[[dict], None]
 
 DEFAULTS = {
     "economy.max_subagents": 2,
+    "desktop.window": "Minecraft",   # computer use limited to this window by default ("" = whole screen)
+    "desktop.max_actions": 400,
     "team.max_cycles": 2,
     "team.implementer": "codex",
     "team.reviewer": "claude",
@@ -69,6 +74,7 @@ class Engine:
                  env: dict[str, str] | None = None):
         self.store = store
         self.home = Path(home or data_dir())
+        self.desktop_command = server_command()
         self.env = env
         self.listeners: list[Listener] = [listener] if listener else []
         self.diagnoses: dict[str, Diagnosis] = {}
@@ -173,12 +179,13 @@ class Engine:
 
     # ----------------------------------------------------------------- queue
     def submit(self, pid: int, intent: Intent, *, write: bool = False, web: bool = True, commands: bool = False,
-               mcp: bool = False, run_tests: bool = False, autonomous: bool = False) -> int:
+               mcp: bool = False, run_tests: bool = False, autonomous: bool = False, desktop: bool = False) -> int:
         if autonomous:
             # autonomous = everything needed to finish the task without asking (Git restore point first)
             write = commands = run_tests = True
         tid = self.store.enqueue(pid, intent.target, intent.text, intent.kind, allow_write=write, allow_web=web,
-                                 allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous)
+                                 allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous,
+                                 desktop=desktop and intent.target != "paralelo")
         self.store.append_event(tid, "user", intent.text, "user")
         if intent.kind == "idea":
             ob = self.outbox(pid)
@@ -213,6 +220,7 @@ class Engine:
     def cancel(self, pid: int) -> bool:
         rt = self.runtimes.get(pid)
         if rt and rt.cancel and rt.thread and rt.thread.is_alive():
+            desktop_control.request_stop(self.home / "desktop", "tarefa interrompida")
             rt.cancel.set()
             return True
         return False
@@ -233,6 +241,9 @@ class Engine:
             try:
                 if task.get("autonomous") and task["allow_write"] and task["target"] != "paralelo":
                     self._restore_point(pid, task)
+                if task.get("desktop"):
+                    desktop_control.reset(self.home / "desktop")
+                    self.emit("desktop", pid=pid, task_id=task["id"], active=True, window=self._desktop_window())
                 if task["target"] == "equipe":
                     status, summary = self._run_team(pid, task, rt.cancel)
                 elif task["target"] == "paralelo":
@@ -245,6 +256,8 @@ class Engine:
             except Exception as exc:
                 status, summary = "error", f"Erro interno: {exc}"
                 self.store.append_event(task["id"], "error", summary + "\n" + traceback.format_exc()[-3000:])
+            if task.get("desktop"):
+                self._finish_desktop(pid, task["id"])
             if rt.cancel.is_set() and status not in ("approved",):
                 status = "cancelled"
                 summary = summary or "Interrompido pelo usuário."
@@ -256,6 +269,40 @@ class Engine:
                 self.emit("log", pid=pid, message="Fila pausada após falha; reative quando resolver o problema.")
                 break
         self.emit("worker_idle", pid=pid)
+
+    # ------------------------------------------------------------ desktop
+    def _desktop_window(self) -> str:
+        return str(self.setting("desktop.window") or "").strip()
+
+    def _desktop_opts(self, pid: int, task: dict) -> dict | None:
+        if not task.get("desktop"):
+            return None
+        from ..appdirs import APP_ROOT
+        env = {"KAGUYA_DESKTOP_DIR": str(desktop_control.control_dir(self.home / "desktop")),
+               "KAGUYA_DESKTOP_WINDOW": self._desktop_window(),
+               "KAGUYA_DESKTOP_MAX": str(int(self.setting("desktop.max_actions") or 400))}
+        if not getattr(sys, "frozen", False):
+            env["PYTHONPATH"] = str(APP_ROOT)
+        for k in ("KAGUYA_DESKTOP_BACKEND", "KAGUYA_DESKTOP_FAKE_LOG"):  # test doubles
+            if (self.env or {}).get(k):
+                env[k] = self.env[k]
+        desk = {"command": list(self.desktop_command), "env": env}
+        cfg = self._logs(pid, task["id"]) / "mcp-desktop.json"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(json.dumps(claude_desktop_config(desk), ensure_ascii=False, indent=1), encoding="utf-8")
+        desk["config_file"] = str(cfg)
+        return desk
+
+    def _finish_desktop(self, pid: int, tid: int) -> None:
+        base = self.home / "desktop"
+        entries, _ = desktop_control.read_activity(base)
+        if entries:
+            lines = [f"[{e.get('t')}] {e.get('action')} {e.get('detail', '')}".rstrip() for e in entries]
+            self.store.append_event(tid, "desktop", f"Uso do computador: {len(entries)} ação(ões).\n" + "\n".join(lines[-200:]))
+        reason = desktop_control.stop_reason(base)
+        if reason and "interrompida" not in reason:
+            self.store.append_event(tid, "system", f"Controle do computador parado: {reason}.")
+        self.emit("desktop", pid=pid, task_id=tid, active=False)
 
     # ------------------------------------------------------------ autonomy
     def _restore_point(self, pid: int, task: dict) -> None:
@@ -378,6 +425,7 @@ class Engine:
                 agents = []
         return {"project": f"{proj['name']} ({proj['directory']})", "memory": self.memory_for(pid, task["title"]),
                 "autonomous": bool(task.get("autonomous")),
+                "desktop": self._desktop_window() if task.get("desktop") else None,
                 "agents": agents, "web": bool(task["allow_web"]), "max_subagents": int(self.setting("economy.max_subagents"))}
 
     # ----------------------------------------------------------------- modes
@@ -392,7 +440,7 @@ class Engine:
         prompt = task_prompt(task["title"], write=write, commands=bool(task["allow_commands"]), **common)
         resume = self.store.session(pid, agent) if self.setting("session.continue") else None
         opts = RunOptions(write=write, commands=bool(task["allow_commands"]), web=bool(task["allow_web"]),
-                          autonomous=bool(task.get("autonomous")),
+                          autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
                           mcp=bool(task["allow_mcp"]), resume=resume, in_git=in_git, workdir=str(cwd),
                           model=self.setting(f"models.{agent}") or None)
         self.store.set_stage(task["id"], "execucao")
@@ -426,7 +474,7 @@ class Engine:
         common = self._common(pid, task)
         max_cycles = max(1, min(5, int(self.setting("team.max_cycles"))))
         impl_opts = RunOptions(write=write, commands=commands, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
-                               autonomous=bool(task.get("autonomous")),
+                               autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
                                in_git=in_git, workdir=str(cwd), model=self.setting(f"models.{impl}") or None)
         rev_opts = RunOptions(write=False, commands=False, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                               in_git=in_git, workdir=str(cwd), model=self.setting("models.review") or None)
@@ -445,7 +493,7 @@ class Engine:
             self._report_checks(pid, tid, checks)
             self._stage(pid, tid, "revisao", cycle, max_cycles)
             review = self._turn(pid, tid, rev, cwd, review_prompt(task["title"], impl, result.final_text, summarize(checks),
-                                                                  cycle, write=False, commands=False, **common),
+                                                                  cycle, write=False, commands=False, **{**common, "desktop": None}),
                                 rev_opts, cancel, f"{rev}_revisao_c{cycle}.log", "revisao")
             rev_opts.resume = review.session_id
             verdict = parse_verdict(review.final_text)

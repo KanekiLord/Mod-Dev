@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.6.0 — 25/11/2026
+
+### Novo
+- **Usar o PC** (chave na conversa, lembrada por projeto): a Kaguya (Codex) e a Claude podem ver a tela e usar
+  mouse e teclado durante as tarefas — por exemplo, abrir o Minecraft, entrar no mundo de teste e conferir o mod.
+  - Feito com um servidor MCP **do próprio Studio**, passado só para essas tarefas (nada é instalado nas
+    configurações das suas CLIs; o Claude roda com `--strict-mcp-config`, sem carregar seus outros MCPs).
+  - **Somente a janela do Minecraft** por padrão (Configurações › Uso do computador): as capturas mostram só essa
+    janela, cliques fora dela são recusados e a janela é trazida para a frente antes de digitar.
+  - Aviso sempre visível com **Parar**; **Ctrl+Alt+End** e **mouse no canto superior esquerdo** também param na hora.
+    Limite de ações por tarefa; atalhos do sistema (Ctrl+Alt+Del, Win+L) recusados; cada ação fica registrada na tarefa.
+  - Ao ligar pela primeira vez o Studio explica que as capturas vão para a IA (OpenAI/Anthropic) pela sua assinatura.
+  - Entrada pelo Windows (SendInput, Unicode para acentos), captura por GDI, coordenadas em pixels reais (DPI).
+  - Com o modo autônomo, tarefas pedidas por voz no Live também podem usar o PC.
+
+### Corrigido
+- Fechar a janela do Live destruía a janela no meio do próprio evento de fechamento (risco de travar/fechar o app).
+- Janelas eram destruídas fora de ordem ao sair do Studio (possível erro ao fechar).
+
 ## 4.5.0 — 25/11/2026
 
 ### Novo

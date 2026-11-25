@@ -38,6 +38,7 @@ class RunOptions:
     web: bool = False            # may search/fetch the web
     mcp: bool = False            # may use configured MCP servers
     autonomous: bool = False     # no confirmations: edit + commands + network for builds (Gradle)
+    desktop: dict | None = None  # {"command": [...], "env": {...}, "config_file": path} → screen/mouse/keyboard MCP
     resume: str | None = None    # session/thread id to continue
     model: str | None = None     # e.g. "sonnet"/"haiku" for cheap roles; None = CLI default
     in_git: bool = True
@@ -67,6 +68,8 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         allowed += COMMAND_TOOLS
     if opts.web:
         allowed += WEB_TOOLS
+    if opts.desktop:
+        allowed.append("mcp__" + DESKTOP_SERVER)
     if not caps.flags or caps.has("--allowedTools") or caps.has("--allowed-tools"):
         cmd += ["--allowedTools", ",".join(allowed)]
     denied = []
@@ -76,7 +79,7 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         denied += WRITE_TOOLS
     if not opts.web:
         denied += WEB_TOOLS
-    if not opts.mcp:
+    if not opts.mcp and not opts.desktop:
         denied.append("mcp__*")
     if opts.autonomous:
         denied += AUTONOMY_DENY
@@ -84,6 +87,10 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["--disallowedTools", ",".join(denied)]
     if opts.model:
         cmd += ["--model", opts.model]
+    if opts.desktop and (not caps.flags or caps.has("--mcp-config")):
+        cmd += ["--mcp-config", str(opts.desktop["config_file"])]
+        if not opts.mcp:
+            cmd.append("--strict-mcp-config")  # only the Studio's desktop server, none of the user's MCPs
     for d in opts.extra_dirs:
         cmd += ["--add-dir", d]
     if opts.resume and (not caps.flags or caps.has("--resume") or caps.has("-r")):
@@ -97,6 +104,8 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
     if opts.autonomous and opts.write and (not caps.flags or caps.has("--config") or caps.has("-c")):
         # builds such as Gradle need to download dependencies; the sandbox still limits writes to the project
         cmd += ["-c", "sandbox_workspace_write.network_access=true"]
+    if opts.desktop and (not caps.flags or caps.has("--config") or caps.has("-c")):
+        cmd += codex_desktop_config(opts.desktop)
     if opts.web:
         cmd.append("--search")
     cmd.append("exec")
@@ -116,6 +125,35 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["-m", opts.model]
     cmd.append("-")  # read the prompt from stdin
     return cmd
+
+
+DESKTOP_SERVER = "kaguya_desktop"
+
+
+def _toml_str(value: str) -> str:
+    value = str(value)
+    if "'" not in value and "\n" not in value:
+        return "'" + value + "'"  # literal string: Windows backslashes need no escaping
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+
+def codex_desktop_config(desktop: dict) -> list[str]:
+    exe, *args = desktop["command"]
+    key = f"mcp_servers.{DESKTOP_SERVER}"
+    env = ",".join(f"{k}={_toml_str(v)}" for k, v in sorted((desktop.get("env") or {}).items()))
+    out = ["-c", f"{key}.command={_toml_str(exe)}",
+           "-c", f"{key}.args=[{','.join(_toml_str(a) for a in args)}]",
+           "-c", f"{key}.default_tools_approval_mode='approve'",  # no double quotes (safe through .cmd launchers)
+           "-c", f"{key}.tool_timeout_sec=90"]
+    if env:
+        out += ["-c", f"{key}.env={{{env}}}"]
+    return out
+
+
+def claude_desktop_config(desktop: dict) -> dict:
+    exe, *args = desktop["command"]
+    return {"mcpServers": {DESKTOP_SERVER: {"type": "stdio", "command": exe, "args": args,
+                                            "env": dict(desktop.get("env") or {})}}}
 
 
 def build_command(target: str, exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:

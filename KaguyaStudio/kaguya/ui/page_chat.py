@@ -176,6 +176,7 @@ class Composer(Card):
     devices = Signal()
     live = Signal()
     autonomy = Signal(bool)
+    desktop = Signal(bool)
 
     def __init__(self):
         super().__init__(padding=12, radius=16, accent=C["gold"])
@@ -233,6 +234,10 @@ class Composer(Card):
         self._manual = None
         perms.addWidget(label("Permissões", "dim"))
         perms.addWidget(self.t_auto)
+        self.t_pc = Toggle("Usar o PC", False, "Deixa a IA ver a tela e usar mouse e teclado (ex.: abrir o Minecraft e testar "
+                           "o mod). Por padrão só a janela do Minecraft; um aviso com botão Parar fica sempre visível.")
+        self.t_pc.toggled.connect(self.desktop.emit)
+        perms.addWidget(self.t_pc)
         for t in (self.t_write, self.t_cmds, self.t_web, self.t_tests, self.t_mcp):
             perms.addWidget(t)
         perms.addStretch(1)
@@ -281,7 +286,13 @@ class Composer(Card):
     def permissions(self) -> dict:
         return {"write": self.t_write.isChecked(), "commands": self.t_cmds.isChecked(), "web": self.t_web.isChecked(),
                 "run_tests": self.t_tests.isChecked(), "mcp": self.t_mcp.isChecked(),
-                "autonomous": self.t_auto.isChecked()}
+                "autonomous": self.t_auto.isChecked(), "desktop": self.t_pc.isChecked()}
+
+    def set_desktop(self, on: bool):
+        self.t_pc.blockSignals(True)
+        self.t_pc.setChecked(on)
+        self.t_pc.blockSignals(False)
+        self.t_pc.set_knob(1.0 if on else 0.0)
 
     def set_autonomous(self, on: bool, notify: bool = False):
         """Reflect the project's autonomous mode: edit/commands/tests are implied and locked on."""

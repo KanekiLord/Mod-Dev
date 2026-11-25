@@ -100,6 +100,11 @@ class MascotCard(QFrame):
         self.dot.set_color(color, self.m.state in ("running", "listening", "speaking"))
 
 
+def control_hotkey() -> str:
+    from ..desktop.control import HOTKEY_TEXT
+    return HOTKEY_TEXT
+
+
 class MainWindow(QMainWindow):
     def __init__(self, store: Store, engine: Engine, demo: bool = False):
         super().__init__()
@@ -152,6 +157,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Shift+L"), self, lambda: self.start_live(None))
         self.live_session = None
         self.live_window = None
+        self.desktop_overlay = None
+        self._hotkey = None
+        self._retired: list = []
         self.refresh_all()
         for m in self.mascots.values():
             if m.prefs.visible:
@@ -207,6 +215,7 @@ class MainWindow(QMainWindow):
         c.devices.connect(self.devices_menu)
         c.live.connect(lambda: self.start_live(None))
         c.autonomy.connect(self.set_autonomy)
+        c.desktop.connect(self.set_desktop_use)
 
     def _sidebar(self) -> QWidget:
         side = QFrame()
@@ -448,7 +457,67 @@ class MainWindow(QMainWindow):
         self.pid = pid
         self.store.set_setting("ui.last_project", pid)
         self.chat.composer.set_autonomous(bool(pid is not None and self.store.autonomous(pid)))
+        self.chat.composer.set_desktop(bool(pid is not None and self.store.get_setting(f"project.{pid}.desktop", False)))
         self.refresh_all()
+
+    def set_desktop_use(self, on: bool):
+        """Let the assistants see the screen and use mouse/keyboard in this project's tasks."""
+        comp = self.chat.composer
+        if self.pid is None:
+            comp.set_desktop(False)
+            return
+        if on and sys.platform != "win32" and not (self.engine.env or {}).get("KAGUYA_DESKTOP_BACKEND"):
+            comp.set_desktop(False)
+            QMessageBox.information(self, "Usar o PC", "O controle do computador só funciona no Windows.")
+            return
+        if on and not self.store.get_setting("desktop.consent", False):
+            window = self.engine.setting("desktop.window") or ""
+            msg = ("Com \"Usar o PC\" ligado, a Kaguya (Codex) e a Claude poderão ver a tela e usar mouse e teclado "
+                   "durante as tarefas — por exemplo, abrir o Minecraft, entrar num mundo e conferir o mod.\n\n"
+                   + (f"• Só a janela cujo título contém \"{window}\" é capturada e usada (mude em Configurações).\n"
+                      if window else "• ATENÇÃO: a tela inteira está liberada (defina uma janela em Configurações).\n")
+                   + "• As capturas de tela são enviadas à IA (OpenAI/Anthropic) pela sua assinatura, como qualquer "
+                     "mensagem: não deixe informações privadas visíveis nessa janela.\n"
+                     f"• Um aviso fica sempre visível com o botão Parar; {control_hotkey()} ou levar o mouse ao canto "
+                     "superior esquerdo também param na hora.\n"
+                     "• A IA não pode digitar senhas, comprar, enviar mensagens nem mexer em configurações do Windows.\n\n"
+                     "Permitir?")
+            if QMessageBox.question(self, "Permitir uso do computador?", msg) != QMessageBox.Yes:
+                comp.set_desktop(False)
+                return
+            self.store.set_setting("desktop.consent", True)
+        self.store.set_setting(f"project.{self.pid}.desktop", bool(on))
+        self.toast("Uso do computador ligado para as próximas tarefas deste projeto." if on
+                   else "Uso do computador desligado.")
+
+    def stop_desktop(self, reason: str):
+        from ..desktop import control
+        control.request_stop(self.engine.home / "desktop", reason)
+        if self.pid is not None:
+            self.engine.cancel(self.pid)
+        self.toast("Controle do computador parado.")
+
+    def _desktop_event(self, ev: dict):
+        if ev.get("active"):
+            if self.desktop_overlay is None:
+                from .desktop_overlay import DesktopOverlay
+                self.desktop_overlay = DesktopOverlay(self)
+            try:
+                target = self.store.get_task(ev["task_id"])["target"]
+            except Exception:
+                target = None
+            self.desktop_overlay.start(target if target in ("codex", "claude") else self.engine.setting("team.implementer"),
+                                       ev.get("window", ""))
+            if self._hotkey is None:
+                from ..desktop.control import StopHotkey
+                self._hotkey = StopHotkey(lambda: self.bridge.call.emit(lambda: self.stop_desktop(control_hotkey())))
+                self._hotkey.start()
+        else:
+            if self.desktop_overlay is not None:
+                self.desktop_overlay.finish()
+            if self._hotkey is not None:
+                self._hotkey.stop()
+                self._hotkey = None
 
     def set_autonomy(self, on: bool):
         """Turn the project's autonomous mode on/off (explained once per project; requires Git)."""
@@ -682,7 +751,8 @@ class MainWindow(QMainWindow):
                 self.engine.cancel(self.pid)
                 self.engine.wait(self.pid, 15)
         tid = self.engine.submit(self.pid, intent, write=perms["write"], web=perms["web"], commands=perms["commands"],
-                                 mcp=perms["mcp"], run_tests=perms["run_tests"], autonomous=auto)
+                                 mcp=perms["mcp"], run_tests=perms["run_tests"], autonomous=auto,
+                                 desktop=bool(perms.get("desktop")) and intent.kind == "execute")
         self.chat.view.message("user", f"**#{tid} · @{intent.target}**" + (f" · {intent.kind.upper()}" if intent.kind != "execute" else "")
                                + f"  \n{intent.text}")
         if intent.kind == "later":
@@ -795,7 +865,8 @@ class MainWindow(QMainWindow):
                     return
                 from ..messages import Intent
                 if self.store.autonomous(self.pid):
-                    tid = self.engine.submit(self.pid, Intent("execute", a, text), web=True, autonomous=True)
+                    tid = self.engine.submit(self.pid, Intent("execute", a, text), web=True, autonomous=True,
+                                             desktop=bool(self.store.get_setting(f"project.{self.pid}.desktop", False)))
                     self.toast(f"Tarefa #{tid} começou no modo autônomo: {text[:80]}")
                 else:
                     tid = self.engine.submit(self.pid, Intent("later", a, text))
@@ -824,7 +895,12 @@ class MainWindow(QMainWindow):
 
     def stop_live(self):
         s, self.live_session = self.live_session, None
-        self.live_window = None
+        lw, self.live_window = self.live_window, None
+        if lw is not None:
+            # called from the Live window's closeEvent: dropping the last reference here would destroy the
+            # widget in the middle of its own event (heap corruption). Release it after the event returns.
+            self._retired.append(lw)
+            QTimer.singleShot(0, self, lambda: self._retired.clear())
         if s:
             run_bg(s.stop)
         self.voice.stop_speaking()
@@ -1116,6 +1192,19 @@ class MainWindow(QMainWindow):
 
     def detach(self):
         self._detached = True
+        # top-level helper windows have no parent (they must stay visible when the Studio is minimized):
+        # delete them explicitly so nothing outlives the main window
+        for attr in ("desktop_overlay", "live_window"):
+            wdg = getattr(self, attr, None)
+            if wdg is not None:
+                if attr == "desktop_overlay":
+                    wdg._timer.stop()
+                wdg.hide()
+                wdg.deleteLater()
+                setattr(self, attr, None)
+        if getattr(self, "_hotkey", None) is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         for t in (self._audio_timer, self._limits_timer, self._timer):
             t.stop()
         if self._listener in self.engine.listeners:
@@ -1132,6 +1221,8 @@ class MainWindow(QMainWindow):
                 self.refresh_projects()
             return
         self.chat.on_event(ev)
+        if t == "desktop":
+            self._desktop_event(ev)
         if t == "task_started":
             self.task_started_at = time.monotonic()
             self.t_title.setText(f"#{ev['task_id']} · {AGENT.get(ev['target'], AGENT['equipe'])['name']} — {ev['title'][:140]}")
@@ -1197,6 +1288,10 @@ class MainWindow(QMainWindow):
             self.engine.cancel(p["id"])
         if self.live_window is not None:
             self.live_window.close()
+        if self._hotkey is not None:
+            self._hotkey.stop()
+        if self.desktop_overlay is not None:
+            self.desktop_overlay.close()
         self.voice.shutdown()
         for m in self.mascots.values():
             if m.window:

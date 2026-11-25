@@ -31,6 +31,13 @@ AUTONOMY_RULES = ("MODO AUTÔNOMO (o usuário pediu para você trabalhar sem ped
                   "global, instalar programas no sistema, mexer fora da pasta do projeto e apagar arquivos que não "
                   "sejam da tarefa. Se precisar de algo assim, registre em PENDÊNCIAS.")
 
+DESKTOP_RULES = ("USO DO COMPUTADOR (o usuário ligou \"Usar o PC\"): você tem as ferramentas kaguya_desktop "
+                 "(screenshot, click, type_text, press_keys, scroll, drag, focus_window, wait). Faça screenshot antes de "
+                 "agir e depois para conferir; prefira atalhos de teclado; espere o programa carregar. {window}"
+                 "Nunca digite senhas nem dados pessoais, não faça compras, não envie mensagens ou e-mails, não mexa em "
+                 "configurações do Windows nem em sites de banco. Se uma ferramenta disser que o usuário parou o "
+                 "controle, pare de usá-la e relate o que fez. Descreva em EVIDÊNCIAS o que viu nas capturas.")
+
 WEB_ON = ("Pesquisa web PERMITIDA: quando a dúvida depender de versão/API/documentação atual, pesquise por iniciativa "
           "própria e traga URL, versão e data de consulta.")
 WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais e as notas fornecidas."
@@ -38,10 +45,13 @@ WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais 
 
 def task_prompt(task: str, *, project: str, memory: str = "", agents: list[str] | None = None,
                 web: bool = False, write: bool = False, commands: bool = False, max_subagents: int = 2,
-                role: str = "", extra: str = "", autonomous: bool = False) -> str:
+                role: str = "", extra: str = "", autonomous: bool = False, desktop: str | None = None) -> str:
     parts = [BASE_RULES.format(max_subagents=max_subagents, web_rule=WEB_ON if web else WEB_OFF)]
     if autonomous and write:
         parts.append(AUTONOMY_RULES)
+    if desktop is not None:
+        parts.append(DESKTOP_RULES.format(window=(f"Só a janela \"{desktop}\" pode ser vista e usada. " if desktop else
+                                                   "A tela inteira está liberada; não abra janelas privadas do usuário. ")))
     perms = [f"Edição de arquivos: {'PERMITIDA (repositório Git)' if write else 'NÃO permitida — apenas analise e proponha'}",
              f"Executar comandos/testes: {'PERMITIDO' if commands else 'NÃO permitido'}"]
     parts.append("PERMISSÕES DESTA TAREFA: " + "; ".join(perms) + ".")

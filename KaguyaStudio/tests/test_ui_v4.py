@@ -69,11 +69,17 @@ class UiBase(unittest.TestCase):
         w = MainWindow(self.store, self.engine)
         w.resize(1366, 740)
         w.show()
+        self.addCleanup(self._flush_deletes)  # runs last: really destroy the window now, not at interpreter exit
         self.addCleanup(w.deleteLater)
         self.addCleanup(self._wait_bg)   # cleanups run in reverse: detach first, then drain
         self.addCleanup(w.detach)
         self.addCleanup(lambda: [self.engine.wait(p["id"], 30) for p in self.store.projects()])
         return w
+
+    def _flush_deletes(self):
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.app.processEvents()
 
     def _wait_bg(self):
         from kaguya.ui.common import wait_background
@@ -195,6 +201,7 @@ class LiveUi(UiBase):
         w.select_project(pid)
         spoken = []
         w.voice.say = lambda text, agent: spoken.append((agent, text)) or True
+        w.voice._ensure_queue = lambda: None  # no audio device in CI: speech is captured above instead
         w.live_window = LiveWindow(w)
         w.live_window.set_agent("claude")
         w.live_window.show()
@@ -284,3 +291,57 @@ class AutonomyUi(UiBase):
             w.chat.composer.t_auto.click()
         self.assertFalse(w.chat.composer.t_auto.isChecked())
         self.assertFalse(self.store.autonomous(pid))
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class DesktopUi(UiBase):
+    def test_use_pc_consent_task_overlay_and_stop(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        from kaguya.desktop import control
+        self.engine.env["KAGUYA_DESKTOP_BACKEND"] = "fake"
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        comp = w.chat.composer
+        with mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.No):
+            comp.t_pc.click()
+        self.assertFalse(comp.t_pc.isChecked())
+        with mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.Yes) as q:
+            comp.t_pc.click()
+        self.assertIn("Minecraft", q.call_args[0][2])          # explains the window restriction
+        self.assertIn("OpenAI/Anthropic", q.call_args[0][2])   # and that screenshots go to the AI
+        self.assertTrue(comp.t_pc.isChecked())
+        w.select_project(None)
+        w.select_project(pid)
+        self.assertTrue(comp.t_pc.isChecked())  # remembered per project
+        shown = []
+        orig = w._desktop_event
+        w._desktop_event = lambda ev: (shown.append(ev["active"]), orig(ev))
+        self.assertTrue(w.send_message("abra o jogo e confira o HUD", "claude", ""))
+        self.assertTrue(self.pump(lambda: self.store.tasks(pid)[0]["status"] not in ("queued", "running")))
+        self.pump(lambda: shown == [True, False], 5)
+        self.assertEqual(shown, [True, False])
+        t = self.store.tasks(pid)[0]
+        self.assertTrue(t["desktop"])
+        self.assertFalse(w.desktop_overlay.isVisible())
+        self.assertGreaterEqual(w.desktop_overlay.count, 2)  # screenshot + click seen by the overlay
+        w.stop_desktop("botão Parar")
+        self.assertIn("Parar", control.stop_reason(self.engine.home / "desktop"))
+
+
+def tearDownModule():
+    """Destroy every top-level window while QApplication still exists (Qt objects that survive until
+    interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""
+    if not HAVE_QT:
+        return
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    app = QApplication.instance()
+    if app is None:
+        return
+    for wdg in app.topLevelWidgets():
+        wdg.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+    gc.collect()

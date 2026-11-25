@@ -19,7 +19,7 @@ import threading
 
 from .paths import normalize_user_path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 TASK_KINDS = ("execute", "later", "idea")
 TARGETS = ("codex", "claude", "equipe", "paralelo")
@@ -107,6 +107,8 @@ class Store:
             cols = {r[1] for r in db.execute("PRAGMA table_info(tasks)")}
             if "autonomous" not in cols:
                 db.execute("ALTER TABLE tasks ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
+            if "desktop" not in cols:
+                db.execute("ALTER TABLE tasks ADD COLUMN desktop INTEGER NOT NULL DEFAULT 0")
             if "checkpoint" not in cols:
                 db.execute("ALTER TABLE tasks ADD COLUMN checkpoint TEXT NOT NULL DEFAULT ''")
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema',?)", (str(SCHEMA_VERSION),))
@@ -223,16 +225,16 @@ class Store:
     def enqueue(self, pid: int, target: str, title: str, kind: str = "execute", *,
                 allow_write: bool = False, allow_web: bool = True, allow_commands: bool = False,
                 allow_mcp: bool = False, run_tests: bool = False, parent_id: int | None = None,
-                autonomous: bool = False) -> int:
+                autonomous: bool = False, desktop: bool = False) -> int:
         if kind not in TASK_KINDS or target not in TARGETS:
             raise ValueError("Tipo ou destino não reconhecido")
         status = "queued" if kind == "execute" else "parked"
         with self.connection() as db:
             cur = db.execute(
                 "INSERT INTO tasks(project_id,parent_id,target,title,kind,status,created_at,allow_write,allow_web,"
-                "allow_commands,allow_mcp,run_tests,autonomous) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "allow_commands,allow_mcp,run_tests,autonomous,desktop) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, parent_id, target, title, kind, status, now(), int(allow_write), int(allow_web),
-                 int(allow_commands), int(allow_mcp), int(run_tests), int(autonomous)))
+                 int(allow_commands), int(allow_mcp), int(run_tests), int(autonomous), int(desktop)))
             return int(cur.lastrowid)
 
     def claim(self, pid: int) -> dict | None:
@@ -299,7 +301,7 @@ class Store:
 
     def activate_later(self, tid: int, **perms) -> bool:
         fields = {k: int(bool(v)) for k, v in perms.items()
-                  if k in ("allow_write", "allow_web", "allow_commands", "allow_mcp", "run_tests", "autonomous")}
+                  if k in ("allow_write", "allow_web", "allow_commands", "allow_mcp", "run_tests", "autonomous", "desktop")}
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.connection() as db:
             cur = db.execute(

@@ -27,6 +27,26 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Uso do computador (4.6.0)
+
+- `test_desktop.py` (backend simulado): só a janela permitida é capturada e as coordenadas são convertidas para a
+  tela; clique fora da janela, janela não permitida e janela ausente são recusados; captura da tela inteira reduzida;
+  botão Parar, failsafe do canto e limite de ações; Ctrl+Alt+Del recusado; teclas seguradas; protocolo JSON-RPC;
+  servidor rodando por `run_kaguya.py --mcp-desktop` via stdio como as CLIs fazem; o motor passa ao Claude só o
+  servidor do Studio (`--strict-mcp-config`) e o Claude simulado **inicia o servidor a partir dessa configuração** e
+  usa screenshot + clique; o Codex recebe `mcp_servers.kaguya_desktop.*` com aprovação automática; tarefas normais
+  não recebem nada disso.
+- `test_ui_v4.py › DesktopUi`: recusar o aviso mantém desligado; o aviso fala da janela permitida e de que as capturas
+  vão para a IA; fica salvo por projeto; tarefa mostra e esconde o aviso flutuante, que conta as ações; Parar grava
+  a parada.
+- **Real (Linux, backend simulado)**: Claude Code 2.1.331, sem nenhuma confirmação, chamou
+  `mcp__kaguya_desktop__screenshot`, viu a imagem 800×600 da janela "Minecraft", clicou no centro (convertido para a
+  posição real na tela), apertou F3, conferiu com outro screenshot e relatou com honestidade que não viu efeito.
+- **Real (Linux)**: `codex-cli 0.172` aceitou a configuração do servidor (`default_tools_approval_mode` só aceita
+  auto/prompt/writes/approve — verificado com um valor inválido).
+- **CI Windows**: teste do backend real (captura GDI, mover e ler o cursor, listar janelas, tecla) e o `.exe` com
+  `--mcp-desktop` por pipes usando o Windows de verdade (lista janelas, captura a tela, move o mouse, tecla).
+
 ## Modo autônomo (4.5.0)
 
 - `test_checkpoint.py` (Git real): o ponto de restauração não altera nada ao ser criado; depois de a "IA" editar,
@@ -83,6 +103,8 @@ capturas 100–200% com renderização do Windows, build PyInstaller e teste de 
 
 - Login e tarefas reais com **suas** assinaturas Codex e Claude; leitura de limites com sua conta Codex.
 - Seu vault real e o formato real do seu `tasks/todo.md`; seus 72 agentes nos diretórios reais.
+- Controle real do Minecraft no seu PC (captura de janela OpenGL, foco, teclas no jogo) e o Codex usando o
+  servidor com a sua conta.
 - Microfone/fone reais, eco sem fone no Live, transcrição faster-whisper com sua voz, vozes SAPI do seu Windows
   e a velocidade do Kokoro no seu processador.
 - Minecraft/Gradle de projetos reais (o Studio executa os testes do projeto só com sua autorização).

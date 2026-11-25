@@ -153,7 +153,23 @@ def main(argv=None) -> int:
         QTimer.singleShot(int(args.sair_apos * 1000), finish)
     code = app.exec()
     dg.step(f"encerrado • código={code}")
+    _teardown(app, win)
     return code
+
+
+def _teardown(app, win) -> None:
+    """Destroy windows while QApplication still exists (objects left for interpreter shutdown are destroyed
+    in arbitrary order, which can crash on exit)."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from .common import wait_background
+    try:
+        win.detach()
+        wait_background(10)
+        for wdg in app.topLevelWidgets():
+            wdg.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    except RuntimeError:
+        pass
 
 
 def _check_voice(dg) -> int:

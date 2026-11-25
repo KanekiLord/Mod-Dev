@@ -74,6 +74,13 @@ jobs:
           Get-Content "$env:KAGUYA_HOME\logs\voz.txt"
           if ($p.ExitCode -ne 0) { throw "voz indisponível no executável (código $($p.ExitCode))" }
 
+      - name: Controle do computador pelo executável (servidor MCP real, entrada e captura do Windows)
+        shell: pwsh
+        run: |
+          $env:KAGUYA_DESKTOP_DIR = "$env:RUNNER_TEMP\kaguya-desktop"
+          $env:KAGUYA_DESKTOP_WINDOW = ""
+          python tools/checar_desktop_exe.py "dist\KaguyaStudio\KaguyaStudio.exe" capturas\win_desktop_mcp.png
+
       - name: Executável em modo normal (como o usuário abre), com dados da V3 para importar
         shell: pwsh
         run: |

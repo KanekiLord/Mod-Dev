@@ -52,6 +52,7 @@ CLAUDE_HELP = """Usage: claude [options] [command] [prompt]
   -p, --print  --output-format <format> "text", "json", or "stream-json"  --verbose
   --permission-mode <mode> (choices: "acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan")
   --allowedTools, --allowed-tools <tools...>  --disallowedTools, --disallowed-tools <tools...>
+  --mcp-config <configs...>  --strict-mcp-config
   --model <model>  -r, --resume [value]  --add-dir <directories...>  --tools <tools...>
 Commands: auth  Manage authentication
 """
@@ -116,6 +117,21 @@ if name == "claude":
             sys.exit(1)
         sid = "11111111-2222-4333-8444-555555555555"
         out({"type": "system", "subtype": "init", "session_id": sid, "model": "claude-test", "tools": ["Read"]})
+        if "--mcp-config" in args:
+            # like the real CLI: start every configured MCP server and use the desktop tools once
+            cfg = json.load(open(args[args.index("--mcp-config") + 1], encoding="utf-8"))
+            for name, srv in cfg["mcpServers"].items():
+                penv = dict(os.environ, **srv.get("env", {}))
+                msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+                        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "screenshot", "arguments": {}}},
+                        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "click", "arguments": {"x": 5, "y": 5}}}]
+                r = subprocess.run([srv["command"], *srv.get("args", [])], input="\n".join(json.dumps(m) for m in msgs) + "\n",
+                                   capture_output=True, text=True, env=penv, timeout=60)
+                replies = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
+                ok = [not rep.get("result", {}).get("isError", True) for rep in replies if rep.get("id") in (2, 3)]
+                out({"type": "assistant", "session_id": sid, "message": {"content": [
+                    {"type": "text", "text": f"MCP {name}: {len(replies)} respostas, ferramentas ok={ok}"}]}})
         if os.environ.get("FAKE_CLAUDE_LIMIT"):
             out({"type": "rate_limit_event", "session_id": sid,
                  "rate_limit_info": {"status": "rejected", "rateLimitType": "five_hour", "resetsAt": 1795600000}})

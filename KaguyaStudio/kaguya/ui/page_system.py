@@ -501,6 +501,26 @@ class SettingsPage(QWidget):
         tc.lay.addWidget(self.t_continue)
         tc.lay.addWidget(self.t_suggest)
         lay.addWidget(tc)
+        # computer use
+        dc = Card(accent=C["gold"])
+        dc.lay.addWidget(label("USO DO COMPUTADOR (MOUSE E TECLADO)", "section"))
+        dc.lay.addWidget(label("Ligue \"Usar o PC\" na conversa para a IA ver a tela e usar mouse/teclado nas tarefas. "
+                               "Restringir a uma janela protege o resto do seu computador e o que aparece nas capturas. "
+                               "Para parar: botão Parar do aviso, Ctrl+Alt+End ou mouse no canto superior esquerdo.",
+                               "muted", wrap=True))
+        dform = QFormLayout()
+        dform.setHorizontalSpacing(18)
+        self.desk_window = QLineEdit(str(win.engine.setting("desktop.window") or ""))
+        self.desk_window.setPlaceholderText("vazio = tela inteira (não recomendado)")
+        self.desk_window.editingFinished.connect(
+            lambda: win.store.set_setting("desktop.window", self.desk_window.text().strip()))
+        self.desk_max = QSpinBox(minimum=10, maximum=2000, value=int(win.engine.setting("desktop.max_actions")))
+        self.desk_max.setMaximumWidth(170)
+        self.desk_max.valueChanged.connect(lambda v: win.store.set_setting("desktop.max_actions", v))
+        dform.addRow("Somente a janela com título contendo", self.desk_window)
+        dform.addRow("Máx. ações por tarefa", self.desk_max)
+        dc.lay.addLayout(dform)
+        lay.addWidget(dc)
         # voice
         vc = Card()
         vc.lay.addWidget(label("VOZ LOCAL (SEM API PAGA)", "section"))
