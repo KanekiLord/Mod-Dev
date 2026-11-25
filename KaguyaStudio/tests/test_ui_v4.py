@@ -793,7 +793,7 @@ class BrowserUi(UiBase):
         rep = got["rep"]
         self.assertEqual(rep.meta["title"], "Tutorial GeckoLib 4")
         self.assertEqual(rep.meta["chapters"][1], (75, "Instalação do GeckoLib 4.4"))
-        self.assertTrue(rep.levels()["B — texto"].startswith("indisponível"))     # nothing read yet: says so
+        self.assertTrue(rep.levels()["B — texto"].startswith("ainda não lido"))   # captions exist, not read yet: says so
         self.assertFalse(page.side.isHidden())
         self.assertEqual(page.yt_chapters.count(), 3)
         page.fetch_captions(done=lambda r: got.update(caps=r))
