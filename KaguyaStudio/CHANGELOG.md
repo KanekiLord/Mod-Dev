@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.8.0 — 25/11/2026
+
+### Novo
+- **Meu computador** (menu lateral): a Kaguya e a Miwa trabalham fora dos projetos, como assistentes pessoais —
+  ler, criar e editar arquivos na sua pasta de usuário (Downloads, Documentos…), abrir arquivos, pastas, sites e apps,
+  usar a tela/mouse/teclado (tela inteira), criar **timers, alarmes, lembretes** (a mascote avisa com voz e
+  notificação, mesmo com o Studio na bandeja) e **eventos de agenda** (.ics aberto no seu calendário).
+  - Pedidos por voz que são "no computador" ("Miwa, abre o WhatsApp e manda…", "Kaguya, vai na pasta Downloads…")
+    viram tarefas de "Meu computador" automaticamente.
+  - **Confirmação obrigatória (Sim/Não, com o texto exato)** antes de enviar mensagens/e-mails, apagar/mover/
+    sobrescrever seus arquivos e executar programas; sem resposta = não. A mascote aparece, fala a pergunta e a janela
+    fica por cima de tudo. Nunca digitam senhas nem fazem compras; apagar pastas inteiras pelo terminal é bloqueado.
+  - Explicado e confirmado uma vez antes de ativar. Sem Git aqui: alterações fora de projetos não têm "Desfazer".
+- Pesquisa sobre IA grátis, IA por voz e n8n em `docs/PESQUISA_VOZ_IA_N8N.md`.
+
 ## 4.7.0 — 25/11/2026
 
 ### Novo

@@ -27,6 +27,19 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Meu computador (4.8.0)
+
+- `test_pc_mode.py`: horários ("16:30", "9h" → amanhã, data completa), timers que vencem, evento .ics correto;
+  confirmação ida e volta, sem resposta = não; abrir programa exige confirmação; abrir pasta/site; ferramentas novas só
+  existem no modo Meu computador; "regedit" recusado; tarefa sem Git roda na pasta do usuário com tela inteira, com
+  `rm -rf`, `Remove-Item -Recurse` e `git push` bloqueados.
+- `test_ui_v4.py › PcModeUi`: sem ativar, pedido por voz explica como ativar; ativação explicada; tarefa digitada e por
+  voz; pergunta de confirmação aparece e a resposta volta ao processo da IA; alarme faz a mascote aparecer e falar.
+- **Real (Claude Code 2.1.331, tela simulada)**: "Miwa, abre o WhatsApp e manda mensagem para mamãe…" → abriu o app
+  pelo menu Iniciar, conferiu a tela; como a janela não apareceu (simulador), **não enviou nada** e relatou isso.
+  "Vá até Downloads, abra Batata Game 2 e analise" → achou `main.py`, **reproduziu** o erro `vida`/`vidas`
+  (NameError) e entregou análise e lista de problemas.
+
 ## Chamar pelo nome, conversa, chats e bandeja (4.7.0)
 
 - `test_live.py › NameDetection`: "Kaguya, …", "Ei Miwa, …", "Miwa (Claude Code) …", grafias do Whisper ("kaguia");

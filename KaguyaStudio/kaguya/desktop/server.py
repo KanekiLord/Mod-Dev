@@ -57,6 +57,33 @@ TOOLS = [
      "annotations": {"readOnlyHint": True}},
 ]
 
+# Personal-assistant tools ("Meu computador" mode only: KAGUYA_DESKTOP_PC=1)
+PC_TOOLS = [
+    {"name": "open_path", "description": "Abre um arquivo, pasta ou site com o programa padrão do Windows "
+     "(ex.: C:\\Users\\voce\\Downloads, um .txt, https://youtube.com).",
+     "inputSchema": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}},
+    {"name": "open_app", "description": "Abre um aplicativo pelo nome, como no menu Iniciar (ex.: WhatsApp, Relógio, "
+     "Calendário, Spotify, Microsoft Edge). Depois tire um screenshot.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "set_timer", "description": "Cria um timer do Kaguya Studio: a mascote avisa com voz e notificação.",
+     "inputSchema": {"type": "object", "properties": {"minutes": {"type": "number"}, "label": {"type": "string"}},
+                     "required": ["minutes"]}},
+    {"name": "set_reminder", "description": "Cria um lembrete/alarme do Kaguya Studio para um horário "
+     "(\"HH:MM\" de hoje/amanhã ou \"AAAA-MM-DD HH:MM\").",
+     "inputSchema": {"type": "object", "properties": {"when": {"type": "string"}, "text": {"type": "string"}},
+                     "required": ["when", "text"]}},
+    {"name": "create_event", "description": "Cria um evento de agenda (.ics) e abre no app de calendário do usuário "
+     "para ele salvar. Datas \"AAAA-MM-DD HH:MM\".",
+     "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "start": {"type": "string"},
+                                                      "end": {"type": "string"}, "location": {"type": "string"}},
+                     "required": ["title", "start"]}},
+    {"name": "confirm", "description": "OBRIGATÓRIO antes de ações sem volta: enviar mensagem/e-mail, apagar ou "
+     "sobrescrever arquivos do usuário, instalar programas. Mostra ao usuário exatamente o que será feito e espera "
+     "Sim/Não. Só prossiga se a resposta for sim.",
+     "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "description": "ex.: Enviar no WhatsApp para Mamãe: \"...\""}},
+                     "required": ["action"]}},
+]
+
 
 class Refused(Exception):
     pass
@@ -69,6 +96,7 @@ class Desktop:
         self.window_filter = (window if window is not None else os.environ.get("KAGUYA_DESKTOP_WINDOW", "")).strip()
         self.max_actions = max_actions or int(os.environ.get("KAGUYA_DESKTOP_MAX", "400") or 400)
         self.max_width = int(os.environ.get("KAGUYA_DESKTOP_WIDTH", "1280") or 1280)
+        self.pc = os.environ.get("KAGUYA_DESKTOP_PC") == "1"
         self.actions = 0
         self.region: Rect | None = None
         self.step = 1
@@ -206,7 +234,53 @@ class Desktop:
                 self.b.keys(keys)
             control.log_action(self.base, "keys", "+".join(keys) + (f" ({hold:.1f} s)" if hold else ""))
             return [{"type": "text", "text": "Teclas enviadas."}]
+        if name in {t["name"] for t in PC_TOOLS}:
+            if not self.pc:
+                raise Refused("Esta ferramenta só existe no modo Meu computador.")
+            return self.pc_call(name, a)
         raise Refused(f"Ferramenta desconhecida: {name}")
+
+    # --------------------------------------------------------------- personal assistant
+    def pc_call(self, name: str, a: dict) -> list[dict]:
+        from . import assistant
+        self._guard(name, input_action=name in ("open_app",))
+        if name == "open_path":
+            target = assistant.open_target(str(a.get("target", "")))
+            control.log_action(self.base, "open", target)
+            return [{"type": "text", "text": f"Aberto: {target}. Tire um screenshot para ver."}]
+        if name == "open_app":
+            app = str(a.get("name", "")).strip()
+            assistant.check_app(app)
+            self.b.keys(["win"])
+            time.sleep(0.8)
+            self.b.type_text(app)
+            time.sleep(1.2)
+            self.b.keys(["enter"])
+            control.log_action(self.base, "app", app)
+            time.sleep(1.5)
+            return [{"type": "text", "text": f"Pedi ao Windows para abrir \"{app}\". Tire um screenshot para conferir."}]
+        if name == "set_timer":
+            item = assistant.add_alarm(self.base, minutes=float(a.get("minutes", 0)), text=str(a.get("label") or "Timer"))
+            control.log_action(self.base, "timer", item["text"])
+            return [{"type": "text", "text": f"Timer criado para {item['at_text']}."}]
+        if name == "set_reminder":
+            item = assistant.add_alarm(self.base, when=str(a.get("when", "")), text=str(a.get("text", "Lembrete")))
+            control.log_action(self.base, "reminder", item["text"])
+            return [{"type": "text", "text": f"Lembrete criado para {item['at_text']}."}]
+        if name == "create_event":
+            path = assistant.create_event(self.base, str(a.get("title", "")), str(a.get("start", "")),
+                                          str(a.get("end") or ""), str(a.get("location") or ""))
+            assistant.open_target(str(path))
+            control.log_action(self.base, "event", str(a.get("title", "")))
+            return [{"type": "text", "text": f"Evento criado ({path.name}) e aberto no calendário do usuário; "
+                                             "se aparecer um botão Salvar/Adicionar, clique nele."}]
+        if name == "confirm":
+            action = str(a.get("action", "")).strip()
+            ok = assistant.ask_user(self.base, action)
+            control.log_action(self.base, "confirm", ("SIM: " if ok else "NÃO: ") + action)
+            return [{"type": "text", "text": "O usuário CONFIRMOU. Pode fazer exatamente isso." if ok else
+                     "O usuário NÃO confirmou (ou não respondeu). Não faça a ação; pergunte o que ele prefere."}]
+        raise Refused(name)
 
 
 # --------------------------------------------------------------------------- JSON-RPC over stdio
@@ -234,7 +308,8 @@ def handle(desk_factory, msg: dict, state: dict) -> dict | None:
     if method == "ping":
         return {"jsonrpc": "2.0", "id": mid, "result": {}}
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
+        tools = TOOLS + (PC_TOOLS if os.environ.get("KAGUYA_DESKTOP_PC") == "1" else [])
+        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
     if method == "tools/call":
         try:
             if state.get("desk") is None:

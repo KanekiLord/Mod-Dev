@@ -183,6 +183,10 @@ class Engine:
         if autonomous:
             # autonomous = everything needed to finish the task without asking (Git restore point first)
             write = commands = run_tests = True
+        if self.store.is_pc(pid) and intent.kind == "execute":
+            # personal assistant: files anywhere in the user's folder, commands, screen/mouse/keyboard;
+            # irreversible actions go through the confirm tool (enforced by the prompt + denied shell patterns)
+            write, commands, desktop, autonomous, run_tests = True, True, True, False, False
         tid = self.store.enqueue(pid, intent.target, intent.text, intent.kind, allow_write=write, allow_web=web,
                                  allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous,
                                  desktop=desktop and intent.target != "paralelo")
@@ -243,7 +247,7 @@ class Engine:
                     self._restore_point(pid, task)
                 if task.get("desktop"):
                     desktop_control.reset(self.home / "desktop")
-                    self.emit("desktop", pid=pid, task_id=task["id"], active=True, window=self._desktop_window())
+                    self.emit("desktop", pid=pid, task_id=task["id"], active=True, window=self._desktop_window(pid))
                 if task["target"] == "equipe":
                     status, summary = self._run_team(pid, task, rt.cancel)
                 elif task["target"] == "paralelo":
@@ -271,16 +275,27 @@ class Engine:
         self.emit("worker_idle", pid=pid)
 
     # ------------------------------------------------------------ desktop
-    def _desktop_window(self) -> str:
+    def _desktop_window(self, pid: int | None = None) -> str:
+        if self.store.is_pc(pid):
+            return ""  # personal-assistant tasks use the whole screen (other apps, WhatsApp, calendar…)
         return str(self.setting("desktop.window") or "").strip()
+
+    def _pc_dirs(self, pid: int) -> list[str]:
+        if not self.store.is_pc(pid):
+            return []
+        extra = self.store.get_setting("pc.extra_dirs", []) or []
+        return [d for d in extra if Path(d).is_dir()]
 
     def _desktop_opts(self, pid: int, task: dict) -> dict | None:
         if not task.get("desktop"):
             return None
         from ..appdirs import APP_ROOT
         env = {"KAGUYA_DESKTOP_DIR": str(desktop_control.control_dir(self.home / "desktop")),
-               "KAGUYA_DESKTOP_WINDOW": self._desktop_window(),
+               "KAGUYA_DESKTOP_WINDOW": self._desktop_window(pid),
+               "KAGUYA_DESKTOP_AGENT": task["target"] if task["target"] in ("codex", "claude") else "codex",
                "KAGUYA_DESKTOP_MAX": str(int(self.setting("desktop.max_actions") or 400))}
+        if self.store.is_pc(pid):
+            env["KAGUYA_DESKTOP_PC"] = "1"
         if not getattr(sys, "frozen", False):
             env["PYTHONPATH"] = str(APP_ROOT)
         for k in ("KAGUYA_DESKTOP_BACKEND", "KAGUYA_DESKTOP_FAKE_LOG"):  # test doubles
@@ -425,7 +440,8 @@ class Engine:
                 agents = []
         return {"project": f"{proj['name']} ({proj['directory']})", "memory": self.memory_for(pid, task["title"]),
                 "autonomous": bool(task.get("autonomous")),
-                "desktop": self._desktop_window() if task.get("desktop") else None,
+                "desktop": self._desktop_window(pid) if task.get("desktop") else None,
+                "pc": self.store.is_pc(pid),
                 "agents": agents, "web": bool(task["allow_web"]), "max_subagents": int(self.setting("economy.max_subagents"))}
 
     # ----------------------------------------------------------------- modes
@@ -433,7 +449,7 @@ class Engine:
         agent = task["target"]
         proj, cwd, in_git, _root = self._project(pid)
         write = bool(task["allow_write"])
-        if write and not in_git:
+        if write and not in_git and not self.store.is_pc(pid):
             raise TaskFailed("Edição bloqueada: a pasta não está em um repositório Git. Rode 'git init' ou desmarque "
                              "'Permitir alterações'.")
         common = self._common(pid, task)
@@ -441,6 +457,7 @@ class Engine:
         resume = self.store.session(pid, agent) if self.setting("session.continue") else None
         opts = RunOptions(write=write, commands=bool(task["allow_commands"]), web=bool(task["allow_web"]),
                           autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
+                          pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid),
                           mcp=bool(task["allow_mcp"]), resume=resume, in_git=in_git, workdir=str(cwd),
                           model=self.setting(f"models.{agent}") or None)
         self.store.set_stage(task["id"], "execucao")
@@ -468,13 +485,14 @@ class Engine:
         if impl == rev or {impl, rev} != {"codex", "claude"}:
             impl, rev = "codex", "claude"
         write = bool(task["allow_write"])
-        if write and not in_git:
+        if write and not in_git and not self.store.is_pc(pid):
             raise TaskFailed("Edição bloqueada: a pasta não está em um repositório Git.")
         commands = bool(task["allow_commands"])
         common = self._common(pid, task)
         max_cycles = max(1, min(5, int(self.setting("team.max_cycles"))))
         impl_opts = RunOptions(write=write, commands=commands, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                                autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
+                               pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid),
                                in_git=in_git, workdir=str(cwd), model=self.setting(f"models.{impl}") or None)
         rev_opts = RunOptions(write=False, commands=False, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                               in_git=in_git, workdir=str(cwd), model=self.setting("models.review") or None)

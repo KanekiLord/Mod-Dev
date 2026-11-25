@@ -405,6 +405,54 @@ class CallByNameUi(UiBase):
         w.tray = None
 
 
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class PcModeUi(UiBase):
+    def test_meu_computador_consent_tasks_confirm_and_alarm(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        from kaguya.desktop import assistant
+        self.engine.env["KAGUYA_DESKTOP_BACKEND"] = "fake"
+        home = Path(self.tmp.name) / "Usuario"
+        (home / "Downloads").mkdir(parents=True)
+        w = self.window()
+        spoken = []
+        w.voice.say = lambda text, agent: spoken.append((agent, text)) or True
+        tid, note = w.spoken_task("abrir o WhatsApp e mandar mensagem", "claude", "pc")
+        self.assertIsNone(tid)                                   # not enabled yet → explains instead
+        self.assertIn("Meu computador", note)
+        with mock.patch("pathlib.Path.home", return_value=home), \
+                mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.Yes) as q:
+            w.open_pc_mode()
+        self.assertIn("confirmação", q.call_args[0][2])
+        pc = self.store.get_setting("pc.project_id")
+        self.assertEqual(w.pid, pc)
+        self.assertTrue(w.pc_btn.isChecked())
+        self.assertIn("assistente pessoal", w.p_git.text())
+        self.assertTrue(w.send_message("Kaguya, analise o arquivo Batata Game 2 nos Downloads", "equipe", ""))
+        t = self.store.tasks(pc)[0]
+        self.assertEqual((t["target"], t["allow_write"], t["desktop"]), ("codex", 1, 1))
+        self.assertTrue(self.pump(lambda: self.store.get_task(t["id"])["status"] not in ("queued", "running")))
+        self.assertEqual(self.store.get_task(t["id"])["status"], "executed", self.store.get_task(t["id"])["result"])
+        tid, note = w.spoken_task("criar timer de 5 minutos", "claude", "pc")   # by voice, now enabled
+        self.assertEqual(self.store.get_task(tid)["target"], "claude")
+        # a confirmation asked by the assistant process appears with the mascot and returns the answer
+        base = self.engine.home / "desktop"
+        import threading
+        result = {}
+        th = threading.Thread(target=lambda: result.setdefault("ok", assistant.ask_user(base, "Enviar para Mamãe: oi", 10)))
+        th.start()
+        self.assertTrue(self.pump(lambda: bool(w.assistant.shown), 5))
+        box = next(iter(w.assistant.shown.values()))
+        self.assertIn("Enviar para Mamãe", box.text())
+        box.button(QMessageBox.Yes).click()
+        th.join(5)
+        self.assertTrue(result["ok"])
+        assistant.add_alarm(base, minutes=0.001, text="tirar o bolo", agent="claude")
+        self.assertTrue(self.pump(lambda: any("tirar o bolo" in t for _, t in spoken), 5))
+        self.assertTrue(w.mascots["claude"].window.isVisible())
+        w.wake.bubble.hide()
+
+
 def tearDownModule():
     """Destroy every top-level window while QApplication still exists (Qt objects that survive until
     interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""

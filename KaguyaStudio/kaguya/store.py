@@ -263,6 +263,25 @@ class Store:
         with self.connection() as db:
             db.execute("UPDATE tasks SET checkpoint=? WHERE id=?", (text, tid))
 
+    # "Meu computador": a special project rooted at the user's home folder (personal-assistant tasks)
+    def pc_project(self, create: bool = True) -> int | None:
+        pid = self.get_setting("pc.project_id")
+        if pid is not None:
+            try:
+                p = self.project(int(pid))
+                if not p.get("removed"):
+                    return int(pid)
+            except (ValueError, TypeError, KeyError):
+                pass
+        if not create:
+            return None
+        pid = self.add_project("Meu computador", Path.home())
+        self.set_setting("pc.project_id", pid)
+        return pid
+
+    def is_pc(self, pid: int | None) -> bool:
+        return pid is not None and self.get_setting("pc.project_id") == pid
+
     # autonomous mode is a per-project choice, remembered between sessions
     def autonomous(self, pid: int) -> bool:
         return bool(self.get_setting(f"project.{pid}.autonomous", False))

@@ -184,7 +184,7 @@ class WakeController:
             quick_transcribe=(lambda audio: quick.transcribe(audio, NAMES_PROMPT)) if quick else None,
             say=win.voice.say, stop_speech=win.voice.stop_speaking, speech_busy=lambda: bool(q and q.busy),
             on_event=lambda ev: win.bridge.call.emit(lambda ev=ev: self.on_event(ev)),
-            on_task=lambda text, a: win.bridge.call.emit(lambda: self.on_task(text, a)),
+            on_task=lambda text, a, scope="project": win.bridge.call.emit(lambda: self.on_task(text, a, scope)),
             input_device=win.voice.input_index(), wake=True,
             follow_up_s=float(win.store.get_setting("wake.follow_up_s", 12)))
         try:
@@ -245,25 +245,13 @@ class WakeController:
         who = f"Você: {self._user}" if self._user else ""
         self.bubble.show_for(self.current, m.window if m else None, text, who, seconds)
 
-    def on_task(self, text: str, agent: str):
-        win = self.win
-        if win.pid is None:
-            win.toast("Pedido de tarefa ouvido, mas nenhum projeto está vinculado.")
-            return
-        from ..messages import Intent
-        if win.store.autonomous(win.pid):
-            tid = win.engine.submit(win.pid, Intent("execute", agent, text), web=True, autonomous=True,
-                                    desktop=bool(win.store.get_setting(f"project.{win.pid}.desktop", False)))
-            note = "Já comecei."
-        else:
-            # without autonomous mode the assistant analyses and proposes (read-only); nothing is changed
-            tid = win.engine.submit(win.pid, Intent("execute", agent, text), web=True)
-            note = "Vou analisar e te mostro o que fazer (para eu alterar sozinha, ligue o modo autônomo)."
-        self.voice_tasks[tid] = agent
-        win.chat.view.message("studio", f"Pedido por voz → tarefa #{tid} para {AGENT[agent]['mascot']}: {text}")
-        win.toast(f"Tarefa #{tid}: {text[:80]}")
-        win.voice.say(note, agent)
-        win.refresh_status()
+    def on_task(self, text: str, agent: str, scope: str = "project"):
+        tid, note = self.win.spoken_task(text, agent, scope)
+        if tid is not None:
+            self.voice_tasks[tid] = agent
+            self.win.toast(f"Tarefa #{tid}: {text[:80]}")
+        if note:
+            self.win.voice.say(note, agent)
 
     def task_done(self, ev: dict):
         agent = self.voice_tasks.pop(ev.get("task_id"), None)

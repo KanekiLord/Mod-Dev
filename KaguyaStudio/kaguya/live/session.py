@@ -20,6 +20,8 @@ from ..voice.speech import split_sentences
 from .vad import EnergyVAD, RATE
 
 TASK = re.compile(r"\[\[\s*TAREFA\s*:\s*(.+?)\s*\]\]", re.S | re.I)
+PC_TASK = re.compile(r"\[\[\s*PC\s*:\s*(.+?)\s*\]\]", re.S | re.I)
+MARKERS = re.compile(r"\[\[\s*(?:TAREFA|PC)\s*:\s*.+?\s*\]\]", re.S | re.I)
 NAMES_PROMPT = ("Kaguya, Miwa, Claude, Codex, Kaguya Studio, Minecraft, Forge, Fabric, NeoForge, Gradle, Blockbench, "
                 "Obsidian, Segundo Cérebro, NarutoCD, Kodachi, mod, commit, GitHub.")
 
@@ -299,11 +301,14 @@ class LiveSession:
         if full and not buf["full"]:
             buf["full"] = buf["text"] = full
         self._speak_ready(buf, agent, final=True)
-        clean = TASK.sub("", buf["full"]).strip()
+        clean = MARKERS.sub("", buf["full"]).strip()
         self._emit({"type": "caption", "role": "assistant", "agent": agent, "text": clean, "final": True})
         for task in TASK.findall(buf["full"]):
             if self._on_task:
                 self._on_task(task.strip(), agent)
+        for task in PC_TASK.findall(buf["full"]):
+            if self._on_task:
+                self._on_task(task.strip(), agent, "pc")
         self._state("speaking" if self._speech_busy() else "listening")
         if self.wake:
             self._awake_until = time.monotonic() + self.follow_up_s
@@ -314,7 +319,7 @@ class LiveSession:
         if "[[" in text and "]]" not in text[text.rfind("[["):]:
             if not final:
                 return
-        text = TASK.sub("", text)
+        text = MARKERS.sub("", text)
         sentences, rest = split_sentences(text, final=final, first_max=55 if buf.get("first") else None)
         buf["text"] = rest
         if sentences:

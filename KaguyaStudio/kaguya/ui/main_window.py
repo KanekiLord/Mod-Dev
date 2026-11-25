@@ -168,6 +168,8 @@ class MainWindow(QMainWindow):
         self._retired: list = []
         from .wake_ui import WakeController
         self.wake = WakeController(self)
+        from .assistant_ui import AssistantWatcher
+        self.assistant = AssistantWatcher(self)
         self._wake_resume = False
         self.setup_tray()
         self.refresh_all()
@@ -250,7 +252,13 @@ class MainWindow(QMainWindow):
             self.nav_group.addButton(b)
             self.nav_buttons[key] = b
             lay.addWidget(b)
-        lay.addSpacing(14)
+        lay.addSpacing(10)
+        self.pc_btn = button("Meu computador", "window", "project",
+                             "Kaguya e Miwa fora dos projetos: suas pastas e arquivos, apps, mensagens, timers e agenda",
+                             checkable=True, color=C["violet"])
+        self.pc_btn.clicked.connect(self.open_pc_mode)
+        lay.addWidget(self.pc_btn)
+        lay.addSpacing(8)
         lay.addWidget(self.side_titles[1])
         lay.addSpacing(4)
         self.project_box = QVBoxLayout()
@@ -602,9 +610,14 @@ class MainWindow(QMainWindow):
                 if isinstance(w, QAbstractButton):
                     self.project_group.removeButton(w)
                 w.deleteLater()
-        projects = self.store.projects()
+        pc_id = self.store.get_setting("pc.project_id")
+        projects = [p for p in self.store.projects() if p["id"] != pc_id]
         if self.pid is None and projects:
             self.pid = projects[0]["id"]
+        if hasattr(self, "pc_btn"):
+            self.pc_btn.setChecked(self.store.is_pc(self.pid))
+            self.pc_btn.setText("" if getattr(self, "_mode", "") == "compact" else
+                                "Meu computador" + ("   ●" if pc_id is not None and self.engine.is_running(pc_id) else ""))
         for p in projects[:12]:
             running = self.engine.is_running(p["id"])
             b = button(p["name"], "sakura" if p["id"] == self.pid else "folder", "project", p["directory"], checkable=True,
@@ -633,6 +646,13 @@ class MainWindow(QMainWindow):
         self.p_name.setText(p["name"])
         self.p_path.setText(self.p_path.fontMetrics().elidedText(p["directory"], Qt.ElideMiddle, 340))
         self.p_path.setToolTip(f"Abrir a pasta do projeto\n{p['directory']}")
+        if self.store.is_pc(self.pid):
+            self.p_git.set("assistente pessoal • pastas, apps e tela", C["violet"])
+            self.p_git_btn.setVisible(False)
+            self.p_gh.setVisible(False)
+            self.p_vault.set("", C["muted"])
+            self.refresh_status()
+            return
         chk = check_project_folder(p["directory"])
         if not chk.ok:
             self.p_git.set("pasta indisponível", C["danger"])
@@ -754,6 +774,11 @@ class MainWindow(QMainWindow):
         if intent.target == "paralelo":
             perms["write"] = True
         auto = bool(perms.get("autonomous")) and intent.kind == "execute"
+        if self.store.is_pc(self.pid):
+            # personal-assistant tasks: one assistant (no review loop), permissions decided by the engine
+            if intent.target not in ("codex", "claude"):
+                intent.target = "codex"
+            perms["write"], auto = False, False
         if (perms["write"] and intent.kind == "execute" and intent.target != "paralelo" and not auto
                 and not self.confirm_write()):
             return False
@@ -838,6 +863,57 @@ class MainWindow(QMainWindow):
         run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd),
                lambda exc, tb: (self.live_window and self.live_window.on_event({"type": "error", "message": str(exc)})))
 
+    def open_pc_mode(self):
+        """Select "Meu computador" (explained once: what the assistants may do outside projects)."""
+        if not self.store.get_setting("pc.consent", False):
+            msg = ("Em \"Meu computador\", a Kaguya (Codex) e a Miwa (Claude Code) trabalham fora dos projetos, como "
+                   "assistentes pessoais:\n\n"
+                   f"• ler, criar e editar arquivos na sua pasta de usuário ({Path.home()}) — Downloads, Documentos, "
+                   "Área de Trabalho…;\n"
+                   "• abrir arquivos, pastas, sites e apps e usar a tela, o mouse e o teclado (as capturas de tela vão "
+                   "para a IA pela sua assinatura);\n"
+                   "• criar timers, alarmes, lembretes e eventos de agenda.\n\n"
+                   "Sempre pedem sua confirmação (Sim/Não, mostrando o texto exato) antes de: enviar mensagens ou "
+                   "e-mails, apagar/mover/sobrescrever seus arquivos e executar programas — porque um comando de voz "
+                   "mal entendido não pode virar uma ação sem volta. Nunca digitam senhas nem fazem compras.\n"
+                   "Não há ponto de restauração Git aqui: arquivos alterados fora de projetos não podem ser desfeitos "
+                   "pelo Studio.\n\nPara parar: botão Parar do aviso, Ctrl+Alt+End ou mouse no canto superior "
+                   "esquerdo.\n\nAtivar \"Meu computador\"?")
+            if QMessageBox.question(self, "Meu computador", msg) != QMessageBox.Yes:
+                self.pc_btn.setChecked(False)
+                return
+            self.store.set_setting("pc.consent", True)
+        self.select_project(self.store.pc_project())
+        self.chat.composer.set_target("codex")
+        self.refresh_projects()
+
+    def spoken_task(self, text: str, agent: str, scope: str = "project") -> tuple[int | None, str]:
+        """A request heard by voice (Live or called by name) becomes a task. Returns (task id, note to say)."""
+        from ..messages import Intent
+        if scope == "pc":
+            if not self.store.get_setting("pc.consent", False):
+                return None, ("Para eu mexer no computador fora dos projetos, ative \"Meu computador\" no Kaguya Studio "
+                              "primeiro.")
+            pid = self.store.pc_project()
+            tid = self.engine.submit(pid, Intent("execute", agent, text), web=True)
+            self.chat.view.message("studio", f"Pedido por voz → Meu computador, tarefa #{tid} para "
+                                   f"{AGENT[agent]['mascot']}: {text}")
+            self.refresh_projects()
+            return tid, "Já estou fazendo."
+        if self.pid is None or self.store.is_pc(self.pid):
+            return None, "Vincule um projeto para eu trabalhar nele."
+        if self.store.autonomous(self.pid):
+            tid = self.engine.submit(self.pid, Intent("execute", agent, text), web=True, autonomous=True,
+                                     desktop=bool(self.store.get_setting(f"project.{self.pid}.desktop", False)))
+            note = "Já comecei."
+        else:
+            # without autonomous mode the assistant analyses and proposes (read-only); nothing is changed
+            tid = self.engine.submit(self.pid, Intent("execute", agent, text), web=True)
+            note = "Vou analisar e te mostro o que fazer (para eu alterar sozinha, ligue o modo autônomo)."
+        self.chat.view.message("studio", f"Pedido por voz → tarefa #{tid} para {AGENT[agent]['mascot']}: {text}")
+        self.refresh_status()
+        return tid, note
+
     def voice_problems(self) -> list[str]:
         from ..voice import devices as dv, stt
         problems = []
@@ -903,20 +979,11 @@ class MainWindow(QMainWindow):
         def on_event(ev):
             self.bridge.call.emit(lambda ev=ev: self.live_window and self.live_window.on_event(ev))
 
-        def on_task(text, a):
+        def on_task(text, a, scope="project"):
             def add():
-                if self.pid is None:
-                    self.toast("Tarefa falada não registrada: vincule um projeto.")
-                    return
-                from ..messages import Intent
-                if self.store.autonomous(self.pid):
-                    tid = self.engine.submit(self.pid, Intent("execute", a, text), web=True, autonomous=True,
-                                             desktop=bool(self.store.get_setting(f"project.{self.pid}.desktop", False)))
-                    self.toast(f"Tarefa #{tid} começou no modo autônomo: {text[:80]}")
-                else:
-                    tid = self.engine.submit(self.pid, Intent("later", a, text))
-                    self.toast(f"Tarefa #{tid} guardada na fila (DEPOIS): {text[:80]}")
-                self.refresh_status()
+                tid, note = self.spoken_task(text, a, scope)
+                if note:
+                    self.toast(note)
             self.bridge.call.emit(add)
         q = self.voice._ensure_queue()
         self.live_session = LiveSession(
@@ -1240,6 +1307,8 @@ class MainWindow(QMainWindow):
 
     def detach(self):
         self._detached = True
+        if getattr(self, "assistant", None) is not None:
+            self.assistant.stop()
         if getattr(self, "wake", None) is not None:
             self.wake.stop(remember=True)
             self.wake.bubble.deleteLater()

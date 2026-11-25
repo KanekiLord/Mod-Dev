@@ -23,6 +23,11 @@ READ_TOOLS = ["Read", "Glob", "Grep", "LS", "TodoWrite", "Agent", "Task"]
 WRITE_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 COMMAND_TOOLS = ["Bash", "PowerShell"]
+# "Meu computador": deleting the user's files in bulk is never done through the shell (the assistant must ask
+# with the confirm tool and delete precise files)
+PC_DENY = [f"{tool}({pat})" for tool in ("Bash", "PowerShell") for pat in (
+    "rm -r:*", "rm -rf:*", "rmdir /s:*", "del /s:*", "Remove-Item -Recurse:*", "Clear-RecycleBin:*",
+    "cipher /w:*", "takeown:*", "icacls:*", "net user:*", "bcdedit:*", "Set-ExecutionPolicy:*")]
 # Autonomous mode runs without confirmations, but some actions stay with the user. These Claude Code
 # permission rules are a first barrier (best effort); the real safety net is the Git restore point.
 AUTONOMY_DENY = [f"{tool}({pat})" for tool in ("Bash", "PowerShell") for pat in (
@@ -39,6 +44,7 @@ class RunOptions:
     mcp: bool = False            # may use configured MCP servers
     autonomous: bool = False     # no confirmations: edit + commands + network for builds (Gradle)
     desktop: dict | None = None  # {"command": [...], "env": {...}, "config_file": path} → screen/mouse/keyboard MCP
+    pc: bool = False             # "Meu computador": user's home folder, no Git requirement, personal-assistant tools
     resume: str | None = None    # session/thread id to continue
     model: str | None = None     # e.g. "sonnet"/"haiku" for cheap roles; None = CLI default
     in_git: bool = True
@@ -53,7 +59,7 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["--output-format", "stream-json"]
         if not caps.flags or caps.has("--verbose"):
             cmd.append("--verbose")  # required by stream-json in print mode
-    if opts.write:
+    if opts.write or opts.pc:
         mode = "acceptEdits"
     elif not caps.flags or caps.mentions("dontAsk"):
         mode = "dontAsk"
@@ -81,8 +87,10 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         denied += WEB_TOOLS
     if not opts.mcp and not opts.desktop:
         denied.append("mcp__*")
-    if opts.autonomous:
+    if opts.autonomous or opts.pc:
         denied += AUTONOMY_DENY
+    if opts.pc:
+        denied += PC_DENY
     if denied and (not caps.flags or caps.has("--disallowedTools") or caps.has("--disallowed-tools")):
         cmd += ["--disallowedTools", ",".join(denied)]
     if opts.model:
@@ -101,7 +109,7 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
 
 def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
     cmd = [exe]
-    if opts.autonomous and opts.write and (not caps.flags or caps.has("--config") or caps.has("-c")):
+    if (opts.autonomous or opts.pc) and opts.write and (not caps.flags or caps.has("--config") or caps.has("-c")):
         # builds such as Gradle need to download dependencies; the sandbox still limits writes to the project
         cmd += ["-c", "sandbox_workspace_write.network_access=true"]
     if opts.desktop and (not caps.flags or caps.has("--config") or caps.has("-c")):
@@ -157,7 +165,7 @@ def claude_desktop_config(desktop: dict) -> dict:
 
 
 def build_command(target: str, exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
-    if opts.write and not opts.in_git:
+    if opts.write and not opts.in_git and not opts.pc:
         raise ValueError("Edição bloqueada: a pasta do projeto não está em um repositório Git (sem como desfazer).")
     if target == "claude":
         return claude_command(exe, caps, opts)

@@ -38,6 +38,16 @@ DESKTOP_RULES = ("USO DO COMPUTADOR (o usuário ligou \"Usar o PC\"): você tem 
                  "configurações do Windows nem em sites de banco. Se uma ferramenta disser que o usuário parou o "
                  "controle, pare de usá-la e relate o que fez. Descreva em EVIDÊNCIAS o que viu nas capturas.")
 
+PC_RULES = ("MODO MEU COMPUTADOR: você é a assistente pessoal do usuário no Windows dele, fora de qualquer projeto. "
+            "Pode ler, criar e editar arquivos na pasta do usuário (Downloads, Documentos, Área de Trabalho…), abrir "
+            "arquivos, pastas, sites e apps (open_path, open_app), usar a tela, o mouse e o teclado, criar timers, "
+            "lembretes e eventos (set_timer, set_reminder, create_event). Faça a tarefa por completo, sem pedir "
+            "confirmação para coisas simples. MAS use SEMPRE a ferramenta confirm antes de: enviar qualquer mensagem "
+            "ou e-mail (mostre destinatário e texto exatos), apagar/mover/sobrescrever arquivos do usuário, executar "
+            "programas baixados ou instalar algo. Se o usuário não confirmar, não faça. Nunca digite senhas, códigos "
+            "de verificação ou dados de cartão; não faça compras nem transferências; não mude configurações do Windows. "
+            "Ao terminar, entregue o resultado pedido (análise, lista, resumo) na resposta.")
+
 WEB_ON = ("Pesquisa web PERMITIDA: quando a dúvida depender de versão/API/documentação atual, pesquise por iniciativa "
           "própria e traga URL, versão e data de consulta.")
 WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais e as notas fornecidas."
@@ -45,11 +55,14 @@ WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais 
 
 def task_prompt(task: str, *, project: str, memory: str = "", agents: list[str] | None = None,
                 web: bool = False, write: bool = False, commands: bool = False, max_subagents: int = 2,
-                role: str = "", extra: str = "", autonomous: bool = False, desktop: str | None = None) -> str:
+                role: str = "", extra: str = "", autonomous: bool = False, desktop: str | None = None,
+                pc: bool = False) -> str:
     parts = [BASE_RULES.format(max_subagents=max_subagents, web_rule=WEB_ON if web else WEB_OFF)]
     if autonomous and write:
         parts.append(AUTONOMY_RULES)
-    if desktop is not None:
+    if pc and write:
+        parts.append(PC_RULES)
+    if desktop is not None and not pc:
         parts.append(DESKTOP_RULES.format(window=(f"Só a janela \"{desktop}\" pode ser vista e usada. " if desktop else
                                                    "A tela inteira está liberada; não abra janelas privadas do usuário. ")))
     perms = [f"Edição de arquivos: {'PERMITIDA (repositório Git)' if write else 'NÃO permitida — apenas analise e proponha'}",
