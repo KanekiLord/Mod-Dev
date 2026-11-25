@@ -877,6 +877,30 @@ class BrowserPage(QWidget):
         self.win.toast(f"{what} — {where}: {note.name}")
         return note
 
+    def shutdown(self):
+        """Release Chromium cleanly: pages before their profiles (otherwise the profile files stay locked on
+        Windows and Qt warns about a profile released while pages still use it)."""
+        self._poll.stop()
+        if self.bridge is not None:
+            self.bridge.close()
+            self.bridge = None
+        self.win.engine.browser_bridge = None
+        self.win.engine.browser_release = None
+        for v in list(self.views.values()):
+            try:
+                v.stop()
+                page = v.page()
+                page.deleteLater()
+                v.deleteLater()
+            except RuntimeError:
+                pass
+        self.views.clear()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)   # pages really gone before the profiles
+        for prof in self._profiles.values():
+            prof.deleteLater()
+        self._profiles.clear()
+
     # ------------------------------------------------------------ browser tools (called through the bridge)
     def confirm_async(self, message: str, done):
         """Ask the user without blocking the Studio (the assistant's tool call waits for the answer)."""

@@ -1506,6 +1506,8 @@ class MainWindow(QMainWindow):
 
     def detach(self):
         self._detached = True
+        if getattr(self, "browser", None) is not None:
+            self.browser.shutdown()
         if getattr(self, "assistant", None) is not None:
             self.assistant.stop()
         if getattr(self, "wake", None) is not None:

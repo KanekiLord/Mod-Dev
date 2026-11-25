@@ -51,7 +51,9 @@ class UiBase(unittest.TestCase):
         cls.app.setStyleSheet(theme.stylesheet())
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # Windows: Chromium (QtWebEngine) may hold its profile files a little after the browser closes, so the temporary
+        # folder can be removed only partially; the tests themselves still assert everything they check.
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=os.name == "nt")
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         os.environ["KAGUYA_HOME"] = str(root / "home")
