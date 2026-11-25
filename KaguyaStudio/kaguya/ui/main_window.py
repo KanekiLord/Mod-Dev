@@ -50,6 +50,8 @@ class MascotCard(QFrame):
         self.sprite.setMinimumSize(100, 120)
         self.sprite.setToolTip(f"Duplo clique: chat rápido com {a['name']} • botão direito: expressões")
         self.sprite.mouseDoubleClickEvent = lambda e: on_chat(agent)
+        self.sprite.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sprite.customContextMenuRequested.connect(self._menu)
         lay.addWidget(self.sprite, 1)
         name = label(mascot.profile["name"].upper())
         name.setAlignment(Qt.AlignCenter)
@@ -71,6 +73,23 @@ class MascotCard(QFrame):
         lay.addLayout(row)
         mascot.changed.connect(self.refresh)
         self.refresh()
+
+    def _menu(self, pos):
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.addAction(theme.icon("chat", C["text"]), "Chat rápido", lambda: self.m.open_chat.emit(self.m.agent))
+        menu.addAction(theme.icon("window", C["text"]), "Mascote flutuante", self.m.toggle_window)
+        if self.m.variants():
+            vm = menu.addMenu("Visual")
+            for key, text in self.m.variants():
+                act = QAction(text, vm, checkable=True, checked=self.m.prefs.variant == key)
+                act.triggered.connect(lambda _=False, k=key: self.m.set_variant(k))
+                vm.addAction(act)
+        em = menu.addMenu(f"Expressões ({len(self.m.profile['expressions'])})")
+        for ex in self.m.profile["expressions"]:
+            em.addAction(ex.replace("_", " ").capitalize(), lambda ex=ex: self.m.set_expression(ex))
+        menu.exec(self.sprite.mapToGlobal(pos))
 
     def refresh(self):
         self.sprite.set_image(self.m.image())
@@ -440,7 +459,7 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _=False, i=p["id"]: self.select_project(i))
             self.project_group.addButton(b)
             self.project_box.addWidget(b)
-        if not projects:
+        if not projects and getattr(self, "_mode", "") != "compact":
             self.project_box.addWidget(label("Nenhum projeto ainda.\nVincule a pasta de um projeto para começar.", "dim", wrap=True))
 
     def refresh_header(self):

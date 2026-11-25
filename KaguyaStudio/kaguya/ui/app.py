@@ -26,6 +26,8 @@ def _args(argv):
     ap.add_argument("--escala", type=float)
     ap.add_argument("--tamanho", default="1480x920")
     ap.add_argument("--flutuantes", action="store_true", help="em --captura, também captura as mascotes flutuantes")
+    ap.add_argument("--sair-apos", type=float, dest="sair_apos",
+                    help="abre normalmente e fecha após N segundos (teste automático do modo normal)")
     return ap.parse_args(argv)
 
 
@@ -65,36 +67,13 @@ def _setup_demo() -> dict:
             "project": project, "vault": vault, "base": base}
 
 
-def _install_crash_log():
-    """Unhandled errors go to a log file and a dialog instead of a silent exit."""
-    import traceback
-    from datetime import datetime
-
-    def hook(exc_type, exc, tb):
-        text = "".join(traceback.format_exception(exc_type, exc, tb))
-        try:
-            from ..appdirs import data_dir
-            from ..env import redact
-            log = data_dir() / "logs" / f"erro_{datetime.now():%Y%m%d_%H%M%S}.txt"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text(redact(text), encoding="utf-8")
-        except Exception:
-            log = None
-        sys.__stderr__ and sys.__stderr__.write(text)
-        try:
-            from PySide6.QtWidgets import QApplication, QMessageBox
-            if QApplication.instance():
-                QMessageBox.critical(None, "Kaguya Studio — erro inesperado",
-                                     f"{exc_type.__name__}: {exc}\n\nDetalhes salvos em:\n{log}")
-        except Exception:
-            pass
-    sys.excepthook = hook
-
-
 def main(argv=None) -> int:
     args = _args(sys.argv[1:] if argv is None else argv)
+    from . import diagnostics as dg
     if not args.captura:
-        _install_crash_log()
+        dg.install()
+    dg.step(f"início • args={sys.argv[1:] if argv is None else argv} • congelado={getattr(sys, 'frozen', False)}"
+            f" • python={sys.version.split()[0]}")
     if args.escala:
         os.environ["QT_SCALE_FACTOR"] = str(args.escala)
     if args.captura and sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
@@ -113,6 +92,9 @@ def main(argv=None) -> int:
         except Exception:
             pass
     app = QApplication.instance() or QApplication(sys.argv)
+    dg.step(f"QApplication criado • plataforma={app.platformName()}")
+    if not args.captura:
+        dg.start_watchdog(app)
     app.setApplicationName("Kaguya Studio")
     app.setOrganizationName("KaguyaStudio")
 
@@ -128,16 +110,25 @@ def main(argv=None) -> int:
     home = data_dir()
     store = Store(home / "studio.sqlite3")
     store.recover_interrupted()
+    dg.step(f"banco aberto em {home}")
     legacy = legacy_v3_database()
     if legacy and not store.get_setting("migration.v3.done") and not demo:
-        store.import_v3(legacy)
+        try:
+            rep = store.import_v3(legacy)
+            dg.step(f"importação V3: {rep}")
+        except Exception:
+            dg.step("importação V3 falhou (o Studio segue sem ela)")
+            sys.excepthook(*sys.exc_info())
+            store.set_setting("migration.v3.done", True)
     engine = Engine(store, home=home, env=demo["env"] if demo else None)
 
     if demo:
         _seed_demo(store, engine, demo)
 
     from .main_window import MainWindow
+    dg.step("criando janela principal")
     win = MainWindow(store, engine, demo=bool(demo))
+    dg.step("janela criada")
     if args.mascotes:
         for m in win.mascots.values():
             m.show_window()
@@ -147,7 +138,18 @@ def main(argv=None) -> int:
     if args.captura:
         return _capture(app, win, args)
     win.show()
-    return app.exec()
+    dg.step("janela exibida; entrando no laço de eventos")
+    if args.sair_apos:
+        from PySide6.QtCore import QTimer
+
+        def finish():
+            n = dg.error_count()
+            dg.step(f"saída automática • erros={n}")
+            app.exit(0 if n == 0 else 3)
+        QTimer.singleShot(int(args.sair_apos * 1000), finish)
+    code = app.exec()
+    dg.step(f"encerrado • código={code}")
+    return code
 
 
 def _seed_demo(store, engine, demo):

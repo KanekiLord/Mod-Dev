@@ -392,7 +392,9 @@ class Store:
                 report["projects"] += 1
             if vaults and not self.global_vault():
                 # most used vault becomes the global one; project overrides are kept.
-                best = max(set(vaults), key=vaults.count)
+                existing = [v for v in vaults if Path(v).is_dir()]
+                pool = existing or vaults
+                best = max(sorted(set(pool)), key=pool.count)
                 self.set_global_vault(best)
                 report["vault"] = best
                 for pid in id_map.values():

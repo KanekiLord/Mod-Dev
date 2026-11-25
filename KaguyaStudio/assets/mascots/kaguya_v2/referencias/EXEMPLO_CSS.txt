@@ -1,0 +1,6 @@
+/* Usar PNGs individuais transparentes */
+.kaguya-mascote { width: 256px; height: 256px; object-fit: contain; image-rendering: pixelated; }
+/* Sprite sheet: 384x384, células de 128x128 */
+.kaguya-sheet-cell { width: 128px; height: 128px; background-image: url("kaguya_sprite_sheet_3x3_128.png"); background-repeat: no-repeat; image-rendering: pixelated; }
+/* Exemplo: Feliz = coluna 1, linha 0: */
+.kaguya-feliz { background-position: -128px 0px; }

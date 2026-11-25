@@ -141,6 +141,23 @@ class UiSmoke(unittest.TestCase):
         self.assertEqual(w._mode, "wide")
         self.assertEqual(w.nav_buttons["chat"].text(), "Conversa")
 
+    def test_kaguya_v2_is_default_and_v1_still_available(self):
+        from kaguya.ui.mascot import Mascot
+        home = Path(os.environ["KAGUYA_HOME"])
+        m = Mascot("codex", home / "m.json")
+        self.assertEqual(m.prefs.variant, "v2")
+        self.assertIn("dormindo", m.profile["expressions"])
+        m.set_state("limit")
+        self.assertTrue(m.sprite_path(m.expression).name.endswith("kaguya_dormindo.png"))
+        self.assertIn("kaguya_v2", str(m.sprite_path(m.expression)))
+        for st in ("idle", "running", "success", "error", "cancelled", "limit", "speaking", "listening", "approved"):
+            m.set_state(st)
+            self.assertTrue(m.sprite_path(m.expression).is_file(), st)
+            self.assertFalse(m.image().isNull())
+        m.set_variant("v1")
+        self.assertEqual(len(m.profile["expressions"]), 18)
+        self.assertEqual(Mascot("codex", home / "m.json").prefs.variant, "v1")  # persisted
+
     def test_crisp_sprite_has_binary_alpha_and_files_untouched(self):
         from kaguya.appdirs import ASSETS
         from kaguya.ui.widgets import load_sprite

@@ -469,6 +469,15 @@ class SettingsPage(QWidget):
             b = button(f"{AGENT[agent]['mascot']} flutuante", "window", tip="Mostrar/ocultar na área de trabalho")
             b.clicked.connect(lambda _=False, a=agent: win.mascots[a].toggle_window())
             mrow.addWidget(b)
+        self.kaguya_variant = QComboBox()
+        km = win.mascots["codex"]
+        for key, text in km.variants():
+            self.kaguya_variant.addItem(text, key)
+            if key == km.prefs.variant:
+                self.kaguya_variant.setCurrentIndex(self.kaguya_variant.count() - 1)
+        self.kaguya_variant.currentIndexChanged.connect(lambda: km.set_variant(self.kaguya_variant.currentData()))
+        mrow.addWidget(label("Visual da Kaguya", "dim"))
+        mrow.addWidget(self.kaguya_variant)
         imp = button("Importar dados da V3.x", "download", "ghost", "Copia projetos e fila da V3 (o banco antigo não é alterado)")
         imp.clicked.connect(self.import_v3)
         mrow.addWidget(imp)

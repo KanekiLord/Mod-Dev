@@ -62,6 +62,21 @@ jobs:
           $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--captura","capturas\win_exe_diag.png","--pagina","diag" -PassThru -Wait
           if (-not (Test-Path capturas\win_exe_diag.png)) { throw "executável não gerou a captura (código $($p.ExitCode))" }
 
+      - name: Executável em modo normal (como o usuário abre), com dados da V3 para importar
+        shell: pwsh
+        run: |
+          $base = "$env:RUNNER_TEMP\kaguya-normal"
+          New-Item -ItemType Directory -Force "$base\lad\KaguyaStudioV3", "$base\proj", "$base\vault\.obsidian" | Out-Null
+          python -c "import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); d.executescript('CREATE TABLE projects(id INTEGER PRIMARY KEY, name TEXT, directory TEXT UNIQUE, vault TEXT, created_at TEXT); CREATE TABLE tasks(id INTEGER PRIMARY KEY, project_id INT, target TEXT, title TEXT, kind TEXT, status TEXT, created_at TEXT, allow_write INT, allow_web INT, started_at TEXT, finished_at TEXT, result TEXT);'); d.execute('INSERT INTO projects VALUES(1,?,?,?,?)', ('NarutoCD', sys.argv[2], sys.argv[3], 'x')); d.execute('INSERT INTO projects VALUES(2,?,?,?,?)', ('Ghoulcraft', 'Z:\\Projetos\\Ghoulcraft', 'Z:\\Segundo Cerebro', 'x')); d.commit()" "$base\lad\KaguyaStudioV3\studio.sqlite3" "$base\proj" "$base\vault"
+          $env:LOCALAPPDATA = "$base\lad"
+          $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--sair-apos","12" -PassThru
+          if (-not $p.WaitForExit(90000)) { Write-Host "TRAVOU: processo não terminou em 90 s"; Stop-Process -Id $p.Id -Force; $code = 99 } else { $code = $p.ExitCode }
+          Write-Host "---- inicializacao.log ----"; Get-Content "$base\lad\KaguyaStudio\logs\inicializacao.log" -ErrorAction SilentlyContinue
+          Write-Host "---- erros.log ----"; Get-Content "$base\lad\KaguyaStudio\logs\erros.log" -ErrorAction SilentlyContinue
+          Get-ChildItem "$base\lad\KaguyaStudio\logs" -Filter "travamento_*" -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName }
+          Copy-Item "$base\lad\KaguyaStudio\logs" capturas\logs-modo-normal -Recurse -ErrorAction SilentlyContinue
+          if ($code -ne 0) { throw "modo normal falhou (código $code)" }
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

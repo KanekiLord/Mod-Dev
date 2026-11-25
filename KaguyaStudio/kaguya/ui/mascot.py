@@ -33,6 +33,21 @@ PROFILES = {
                           "cancelled": "pensando", "limit": "cafe", "speaking": "falando", "listening": "piscando",
                           "thinking": "pensando", "approved": "feliz", "rejected": "pensando"}},
 }
+# Alternative art sets. Kaguya V2 (9 expressions, 2026-11) is the default; V1 (18 + animation
+# frames) stays available. Original files are never modified.
+VARIANTS = {
+    "codex": {
+        "v2": {"folder": "kaguya_v2", "prefix": "kaguya", "label": "Kaguya V2 (9 expressões)", "animated": False,
+               "expressions": ["neutra", "feliz", "pensando", "falando", "surpresa", "entediada", "apaixonada",
+                               "confiante", "dormindo"],
+               "states": {"idle": "neutra", "running": "pensando", "success": "feliz", "error": "surpresa",
+                          "cancelled": "entediada", "limit": "dormindo", "speaking": "falando", "listening": "surpresa",
+                          "thinking": "pensando", "approved": "confiante", "rejected": "entediada"}},
+        "v1": {"label": "Kaguya V1 (18 expressões + animações)", "animated": True},
+    },
+}
+DEFAULT_VARIANT = {"codex": "v2"}
+
 STATE_LABELS = {"idle": "Aguardando", "running": "Trabalhando", "success": "Concluiu o turno", "error": "Erro",
                 "cancelled": "Interrompido", "limit": "Limite atingido", "speaking": "Falando", "listening": "Ouvindo",
                 "thinking": "Pensando", "approved": "Aprovado", "rejected": "Reprovado"}
@@ -47,6 +62,7 @@ class MascotPrefs:
     topmost: bool = True
     crisp: bool = True
     animations: bool = False
+    variant: str = ""
 
 
 class Mascot(QObject):
@@ -57,9 +73,10 @@ class Mascot(QObject):
     def __init__(self, agent: str, prefs_path: Path):
         super().__init__()
         self.agent = agent
-        self.profile = PROFILES[agent]
         self.prefs_path = prefs_path
         self.prefs = self._load_prefs()
+        if not self.prefs.variant or self.prefs.variant not in VARIANTS.get(agent, {}):
+            self.prefs.variant = DEFAULT_VARIANT.get(agent, "")
         self.state = "idle"
         self.expression = self.profile["states"]["idle"]
         self._cache: dict[tuple[str, bool], QImage] = {}
@@ -73,13 +90,28 @@ class Mascot(QObject):
         except (OSError, ValueError, TypeError):
             return MascotPrefs()
 
+    @property
+    def profile(self) -> dict:
+        base = PROFILES[self.agent]
+        override = VARIANTS.get(self.agent, {}).get(self.prefs.variant)
+        return {**base, **override} if override else base
+
+    def variants(self) -> list[tuple[str, str]]:
+        return [(k, v["label"]) for k, v in VARIANTS.get(self.agent, {}).items()]
+
+    def set_variant(self, variant: str) -> None:
+        if variant in VARIANTS.get(self.agent, {}):
+            self.prefs.variant = variant
+            self.save()
+            self.set_state(self.state)
+
     def save(self):
         self.prefs_path.parent.mkdir(parents=True, exist_ok=True)
         self.prefs_path.write_text(json.dumps(asdict(self.prefs), indent=2), encoding="utf-8")
 
     def sprite_path(self, expression: str) -> Path:
         base = ASSETS / "mascots" / self.profile["folder"]
-        if self.prefs.animations and self.agent == "codex":
+        if self.prefs.animations and self.profile.get("animated", self.agent == "codex"):
             seq = None
             if expression == "falando":
                 seq, idx = "talk", (self.tick // 3) % 3 + 1
@@ -228,7 +260,13 @@ class FloatingMascot(QWidget):
         crisp = QAction("Recorte nítido (pixel art)", menu, checkable=True, checked=self.m.prefs.crisp)
         crisp.toggled.connect(self._set_crisp)
         menu.addAction(crisp)
-        if self.m.agent == "codex":
+        if self.m.variants():
+            vmenu = menu.addMenu("Visual")
+            for key, text in self.m.variants():
+                act = QAction(text, vmenu, checkable=True, checked=self.m.prefs.variant == key)
+                act.triggered.connect(lambda _=False, k=key: (self.m.set_variant(k), self.update()))
+                vmenu.addAction(act)
+        if self.m.profile.get("animated"):
             anim = QAction("Animações experimentais", menu, checkable=True, checked=self.m.prefs.animations)
             anim.toggled.connect(self._set_anim)
             menu.addAction(anim)

@@ -1,0 +1,148 @@
+{
+  "name": "Kaguya — Mascote Pixel Art V2",
+  "version": "2.0.0",
+  "character": "Kaguya",
+  "style": "anime pixel art",
+  "frame_width": 128,
+  "frame_height": 128,
+  "sheet_columns": 3,
+  "sheet_rows": 3,
+  "background": "transparent",
+  "frame_count": 9,
+  "source_canvas": [
+    1254,
+    1254
+  ],
+  "source_frame_size": [
+    418,
+    418
+  ],
+  "sprites": [
+    {
+      "id": "neutra",
+      "label": "Neutra",
+      "filename": "sprites_128/kaguya_neutra.png",
+      "high_res": "sprites_original_418/kaguya_neutra.png",
+      "sheet_cell": {
+        "row": 0,
+        "column": 0,
+        "x": 0,
+        "y": 0,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "feliz",
+      "label": "Feliz",
+      "filename": "sprites_128/kaguya_feliz.png",
+      "high_res": "sprites_original_418/kaguya_feliz.png",
+      "sheet_cell": {
+        "row": 0,
+        "column": 1,
+        "x": 128,
+        "y": 0,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "pensando",
+      "label": "Pensando",
+      "filename": "sprites_128/kaguya_pensando.png",
+      "high_res": "sprites_original_418/kaguya_pensando.png",
+      "sheet_cell": {
+        "row": 0,
+        "column": 2,
+        "x": 256,
+        "y": 0,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "falando",
+      "label": "Falando",
+      "filename": "sprites_128/kaguya_falando.png",
+      "high_res": "sprites_original_418/kaguya_falando.png",
+      "sheet_cell": {
+        "row": 1,
+        "column": 0,
+        "x": 0,
+        "y": 128,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "surpresa",
+      "label": "Surpresa",
+      "filename": "sprites_128/kaguya_surpresa.png",
+      "high_res": "sprites_original_418/kaguya_surpresa.png",
+      "sheet_cell": {
+        "row": 1,
+        "column": 1,
+        "x": 128,
+        "y": 128,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "entediada",
+      "label": "Entediada",
+      "filename": "sprites_128/kaguya_entediada.png",
+      "high_res": "sprites_original_418/kaguya_entediada.png",
+      "sheet_cell": {
+        "row": 1,
+        "column": 2,
+        "x": 256,
+        "y": 128,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "apaixonada",
+      "label": "Apaixonada",
+      "filename": "sprites_128/kaguya_apaixonada.png",
+      "high_res": "sprites_original_418/kaguya_apaixonada.png",
+      "sheet_cell": {
+        "row": 2,
+        "column": 0,
+        "x": 0,
+        "y": 256,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "confiante",
+      "label": "Confiante",
+      "filename": "sprites_128/kaguya_confiante.png",
+      "high_res": "sprites_original_418/kaguya_confiante.png",
+      "sheet_cell": {
+        "row": 2,
+        "column": 1,
+        "x": 128,
+        "y": 256,
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "id": "dormindo",
+      "label": "Dormindo",
+      "filename": "sprites_128/kaguya_dormindo.png",
+      "high_res": "sprites_original_418/kaguya_dormindo.png",
+      "sheet_cell": {
+        "row": 2,
+        "column": 2,
+        "x": 256,
+        "y": 256,
+        "width": 128,
+        "height": 128
+      }
+    }
+  ]
+}

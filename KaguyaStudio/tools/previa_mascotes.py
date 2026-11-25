@@ -18,7 +18,8 @@ app = QGuiApplication(sys.argv)
 from kaguya.ui.widgets import load_sprite  # noqa: E402
 
 M = ROOT / "assets" / "mascots"
-SPRITES = [("Kaguya (Codex)", M / "kaguya" / "expressoes" / "kaguya_neutra.png"),
+SPRITES = [("Kaguya V2 (Codex)", M / "kaguya_v2" / "expressoes" / "kaguya_neutra.png"),
+           ("Kaguya V1", M / "kaguya" / "expressoes" / "kaguya_neutra.png"),
            ("Claude", M / "claude" / "expressoes" / "claude_feminina_neutra.png")]
 BGS = [("claro", QColor("#F3F0EA")), ("escuro", QColor("#101010")), ("papel de parede", None)]
 S = 2

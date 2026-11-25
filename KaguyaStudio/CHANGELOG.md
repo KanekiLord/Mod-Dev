@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.0.1 — 25/11/2026
+
+### Corrigido
+- **Janela branca ao abrir o .exe**: o capturador de erros abria uma caixa de diálogo *modal*; um erro
+  repetido em timer empilhava diálogos aninhados que nunca eram desenhados, congelando o app. Agora os
+  erros vão para `%LOCALAPPDATA%\KaguyaStudio\logs\erros.log` com no máximo um aviso não bloqueante.
+- Importação da V3: o vault global passa a ser o que existe no disco (antes podia escolher um inexistente);
+  falha na importação não impede mais o Studio de abrir.
+- Barra lateral compacta não espreme mais o texto "Nenhum projeto ainda".
+
+### Novo
+- Diagnóstico de inicialização: `logs/inicializacao.log` (cada etapa), `logs/travamento_*.txt` (pilhas de
+  execução quando a interface para de responder por 12 s) e `logs/falha_grave.log`.
+- `--sair-apos N` e teste de CI que abre o `.exe` em modo normal com dados da V3 para importar.
+- **Kaguya V2** (9 expressões novas, incluindo *entediada* e *dormindo*) como visual padrão do Codex; a V1
+  (18 expressões + animações) continua disponível em Configurações ou no clique direito da mascote.
+
 ## 4.0.0 — 25/11/2026
 
 Reconstrução da camada de apresentação em PySide6 e correção dos bloqueios da V3.4, preservando o
