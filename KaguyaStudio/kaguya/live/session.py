@@ -1,0 +1,262 @@
+"""Live session: microphone → VAD → local transcription → persistent conversation → fluent speech.
+
+Qt-independent; the UI receives dict events through ``on_event``. Barge-in: when the user starts
+talking while the assistant speaks or thinks, speech stops and the running turn is interrupted.
+Spoken commands: "falar com a Claude/Kaguya" switches assistant, "silêncio" stops the voice,
+"encerrar" ends Live. Requests to change code become ``[[TAREFA: …]]`` → queued, never executed here.
+"""
+from __future__ import annotations
+
+import queue
+import re
+import threading
+import time
+import unicodedata
+from typing import Callable
+
+import numpy as np
+
+from ..voice.speech import split_sentences
+from .vad import EnergyVAD, RATE
+
+TASK = re.compile(r"\[\[\s*TAREFA\s*:\s*(.+?)\s*\]\]", re.S | re.I)
+NAMES_PROMPT = ("Kaguya, Claude, Codex, Kaguya Studio, Minecraft, Forge, Fabric, NeoForge, Gradle, Blockbench, "
+                "Obsidian, Segundo Cérebro, NarutoCD, Kodachi, mod, commit, GitHub.")
+
+
+def _norm(t: str) -> str:
+    t = unicodedata.normalize("NFKD", t or "")
+    return "".join(c for c in t if not unicodedata.combining(c)).lower().strip(" .,!?")
+
+
+def command_of(text: str) -> tuple[str, str]:
+    """Spoken control commands (never sent to the AI)."""
+    n = _norm(text)
+    if re.search(r"^(encerrar|encerra|sair do (modo )?live|terminar (o )?live|tchau|ate (mais|logo))\b", n):
+        return "end", ""
+    if re.search(r"(falar|fala|conversar|passa) com a? ?(claude|clode|cloud)\b|^(claude|cloud)[, ]*$", n):
+        return "switch", "claude"
+    if re.search(r"(falar|fala|conversar|passa) com a? ?(kaguya|kaguia|caguia|codex)\b|^(kaguya|codex)[, ]*$", n):
+        return "switch", "codex"
+    if re.search(r"^(silencio|para de falar|pare de falar|chega)\b", n):
+        return "silence", ""
+    return "", ""
+
+
+class LiveSession:
+    def __init__(self, *, agent: str, make_conversation: Callable[[str], object], transcribe: Callable[[np.ndarray], str],
+                 say: Callable[[str, str], bool], stop_speech: Callable[[], None], speech_busy: Callable[[], bool],
+                 on_event: Callable[[dict], None], on_task: Callable[[str, str], None] | None = None,
+                 input_device: int | None = None):
+        self.agent = agent
+        self._make, self._transcribe = make_conversation, transcribe
+        self._say, self._stop_speech, self._speech_busy = say, stop_speech, speech_busy
+        self._emit, self._on_task = on_event, on_task
+        self.input_device = input_device
+        self.convs: dict[str, object] = {}
+        self.vad = EnergyVAD()
+        self.muted = False
+        self.running = False
+        self._utterances: "queue.Queue[np.ndarray | None]" = queue.Queue()
+        self._cancel = threading.Event()
+        self._responding = False
+        self._stream = None
+        self._mic_thread = None
+
+    # ----------------------------------------------------------------- control
+    def start(self, with_microphone: bool = True):
+        self.running = True
+        threading.Thread(target=self._brain_loop, daemon=True, name="kaguya-live-brain").start()
+        if with_microphone:
+            self._open_microphone()
+        self._emit({"type": "agent", "agent": self.agent})
+        self._state("listening")
+        self.warm(self.agent)
+
+    def warm(self, agent: str):
+        def run():
+            try:
+                conv = self._conversation(agent)
+                if hasattr(conv, "warm"):
+                    conv.warm()
+            except Exception as exc:
+                self._emit({"type": "error", "message": f"Não foi possível iniciar a conversa: {exc}"})
+        threading.Thread(target=run, daemon=True).start()
+
+    def stop(self):
+        self.running = False
+        self._cancel.set()
+        self._stop_speech()
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+        self._utterances.put(None)
+        for c in self.convs.values():
+            try:
+                c.close()
+            except Exception:
+                pass
+        self.convs.clear()
+        self._emit({"type": "end"})
+
+    def set_agent(self, agent: str):
+        if agent != self.agent:
+            self.agent = agent
+            self._emit({"type": "agent", "agent": agent})
+            self.warm(agent)
+
+    def set_muted(self, muted: bool):
+        self.muted = muted
+        self.vad.reset()
+        self._state("muted" if muted else "listening")
+
+    def barge_in(self):
+        """User started talking over the assistant."""
+        if self._speech_busy() or self._responding:
+            self._stop_speech()
+            self._cancel.set()
+            self._emit({"type": "barge_in"})
+
+    # -------------------------------------------------------------- microphone
+    def _open_microphone(self):
+        import sounddevice as sd
+        from ..voice.devices import resample
+        try:
+            info = sd.query_devices(self.input_device, "input")
+            rate = int(info.get("default_samplerate") or RATE)
+        except Exception:
+            rate = RATE
+        block = int(rate * self.vad.cfg.frame_ms / 1000)
+        frames: "queue.Queue[np.ndarray]" = queue.Queue()
+
+        def cb(data, n, t, status):
+            frames.put(data[:, 0].copy())
+        self._stream = sd.InputStream(samplerate=rate, channels=1, dtype="float32", device=self.input_device,
+                                      blocksize=block, callback=cb)
+        self._stream.start()
+
+        def pump():
+            last_level = 0.0
+            while self.running:
+                try:
+                    f = frames.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                self.feed(resample(f, rate, RATE) if rate != RATE else f)
+                if time.monotonic() - last_level > 0.08:
+                    last_level = time.monotonic()
+                    self._emit({"type": "level", "value": self.vad.level})
+        self._mic_thread = threading.Thread(target=pump, daemon=True, name="kaguya-live-mic")
+        self._mic_thread.start()
+
+    def feed(self, frame16k: np.ndarray):
+        """Push microphone audio (16 kHz mono). Public so tests can drive the session without hardware."""
+        if self.muted:
+            return
+        self.vad.assistant_talking = self._speech_busy()
+        for kind, audio in self.vad.feed(frame16k):
+            if kind == "start":
+                self.barge_in()
+                self._state("hearing")
+            elif kind == "end" and audio is not None and len(audio) >= RATE * 0.35:
+                self._utterances.put(audio)
+
+    # ------------------------------------------------------------------ brain
+    def _brain_loop(self):
+        while self.running:
+            audio = self._utterances.get()
+            if audio is None or not self.running:
+                return
+            self._state("transcribing")
+            try:
+                text = (self._transcribe(audio) or "").strip()
+            except Exception as exc:
+                self._emit({"type": "error", "message": f"Transcrição falhou: {exc}"})
+                self._state("listening")
+                continue
+            if len(text) < 2:
+                self._state("listening")
+                continue
+            self.handle_text(text)
+
+    def handle_text(self, text: str):
+        self._emit({"type": "caption", "role": "user", "text": text, "final": True})
+        cmd, arg = command_of(text)
+        if cmd == "end":
+            self._say("Até mais!", self.agent)
+            self.running = False
+            self._emit({"type": "request_end"})
+            return
+        if cmd == "switch":
+            self.set_agent(arg)
+            self._say("Oi, estou aqui." if arg == "claude" else "Oi, é a Kaguya.", arg)
+            self._state("listening")
+            return
+        if cmd == "silence":
+            self._stop_speech()
+            self._state("listening")
+            return
+        self._respond(text)
+
+    def _conversation(self, agent: str):
+        if agent not in self.convs:
+            self.convs[agent] = self._make(agent)
+        return self.convs[agent]
+
+    def _respond(self, text: str):
+        agent = self.agent
+        self._cancel = threading.Event()
+        cancel = self._cancel
+        self._responding = True
+        self._state("thinking")
+        buf = {"text": "", "spoken": "", "full": "", "first": True}
+
+        def on_delta(delta: str):
+            buf["full"] += delta
+            buf["text"] += delta
+            self._emit({"type": "caption", "role": "assistant", "agent": agent, "text": buf["full"], "final": False})
+            self._speak_ready(buf, agent, final=False)
+
+        try:
+            full = self._conversation(agent).ask(text, on_delta, cancel)
+        except Exception as exc:
+            self._responding = False
+            self._emit({"type": "error", "message": str(exc)})
+            self._state("listening")
+            return
+        self._responding = False
+        if cancel.is_set():
+            self._state("listening")
+            return
+        if full and not buf["full"]:
+            buf["full"] = buf["text"] = full
+        self._speak_ready(buf, agent, final=True)
+        clean = TASK.sub("", buf["full"]).strip()
+        self._emit({"type": "caption", "role": "assistant", "agent": agent, "text": clean, "final": True})
+        for task in TASK.findall(buf["full"]):
+            if self._on_task:
+                self._on_task(task.strip(), agent)
+        self._state("speaking" if self._speech_busy() else "listening")
+
+    def _speak_ready(self, buf: dict, agent: str, final: bool):
+        text = buf["text"]
+        # Never speak task markers; hold the buffer while a marker is still open.
+        if "[[" in text and "]]" not in text[text.rfind("[["):]:
+            if not final:
+                return
+        text = TASK.sub("", text)
+        sentences, rest = split_sentences(text, final=final, first_max=55 if buf.get("first") else None)
+        buf["text"] = rest
+        if sentences:
+            buf["first"] = False
+        for s in sentences:
+            if s.strip() and not self._cancel.is_set():
+                if self._say(s, agent):
+                    self._state("speaking")
+
+    def _state(self, state: str):
+        self._emit({"type": "state", "state": state, "agent": self.agent})

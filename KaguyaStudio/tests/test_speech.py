@@ -27,6 +27,21 @@ class Sentences(unittest.TestCase):
         self.assertEqual(out, ["Versão 1.20.1 do Forge.", "Ok. Agora vou compilar o projeto inteiro."])
 
 
+class Chunks(unittest.TestCase):
+    def test_long_sentence_is_cut_at_comma(self):
+        long = ("Os principais são sobrevivência, com coleta de recursos e perigos, criativo, com recursos infinitos e voo, "
+                "aventura, para jogar mapas feitos por outros.")
+        out, _ = split_sentences(long + " ", final=True)
+        self.assertGreater(len(out), 1)
+        self.assertTrue(all(len(x) <= 110 for x in out))
+        self.assertEqual(" ".join(out), long)
+
+    def test_first_piece_of_a_reply_is_short(self):
+        out, _ = split_sentences("O Gradle é uma ferramenta que automatiza a build de projetos, ou seja, compila. ",
+                                 first_max=55)
+        self.assertLessEqual(len(out[0]), 62)
+
+
 class Queue(unittest.TestCase):
     def test_pipeline_order_and_barge_in(self):
         played, states = [], []

@@ -16,7 +16,18 @@ from .tts import clean_for_speech
 _END = re.compile(r"(.+?[.!?…:;](?:[\"')\]]*)(?=\s|$))|(.+?\n)", re.S)
 
 
-def split_sentences(buffer: str, final: bool = False, min_chars: int = 18) -> tuple[list[str], str]:
+def _chunk(piece: str, max_chars: int = 110, min_cut: int = 35) -> list[str]:
+    """Long sentences are cut at a comma so the first audio starts sooner."""
+    if len(piece) <= max_chars:
+        return [piece]
+    cut = piece.find(", ", min_cut)
+    if cut == -1 or len(piece) - cut < 15:
+        return [piece]
+    return [piece[:cut + 1].strip()] + _chunk(piece[cut + 2:].strip(), max_chars)
+
+
+def split_sentences(buffer: str, final: bool = False, min_chars: int = 18, first_max: int | None = None
+                    ) -> tuple[list[str], str]:
     """Take complete sentences out of a streaming buffer. Very short fragments are joined to the
     next one so the voice does not stutter; with ``final`` the remainder is flushed too."""
     out, pos, pending = [], 0, ""
@@ -27,12 +38,14 @@ def split_sentences(buffer: str, final: bool = False, min_chars: int = 18) -> tu
             pending = piece + " "
             continue
         if piece:
-            out.append(piece)
+            out.extend(_chunk(piece))
         pending = ""
     rest = (pending + buffer[pos:]).lstrip()
     if final and rest.strip():
-        out.append(re.sub(r"\s+", " ", rest).strip())
+        out.extend(_chunk(re.sub(r"\s+", " ", rest).strip()))
         rest = ""
+    if first_max and out and len(out[0]) > first_max:
+        out = _chunk(out[0], first_max, 20) + out[1:]
     return out, rest
 
 

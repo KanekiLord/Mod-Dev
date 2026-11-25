@@ -78,6 +78,30 @@ if name == "claude":
         if mode == "claude.ai":
             data["subscriptionType"] = "max"
         print(json.dumps(data, indent=2)); sys.exit(0)
+    if "-p" in args and "--input-format" in args:
+        # Persistent stream-json conversation (Live mode): one process, many turns.
+        sid = "22222222-3333-4444-8555-666666666666"
+        out({"type": "system", "subtype": "init", "session_id": sid, "model": "claude-test"})
+        history = []
+        for line in sys.stdin:
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("type") == "control_request":
+                continue
+            text = (msg.get("message") or {}).get("content", "")
+            history.append(text)
+            reply = f"Entendi, você disse: {text}. Já são {len(history)} mensagens nesta conversa."
+            if "implement" in text.lower():
+                reply += " Vou deixar na fila.\n[[TAREFA: " + text + "]]"
+            for i in range(0, len(reply), 7):
+                out({"type": "stream_event", "session_id": sid,
+                     "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": reply[i:i + 7]}}})
+            out({"type": "rate_limit_event", "session_id": sid, "rate_limit_info": {"status": "allowed",
+                 "unifiedWindows": {"five_hour": {"utilization": 0.3, "resetsAt": 1795600000}}}})
+            out({"type": "result", "subtype": "success", "is_error": False, "session_id": sid, "result": reply})
+        sys.exit(0)
     if "-p" in args:
         # Emulate commander's variadic options: positional after --disallowedTools is a tool name.
         prompt = sys.stdin.read()

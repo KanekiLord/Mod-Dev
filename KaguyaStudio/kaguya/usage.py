@@ -109,6 +109,7 @@ class AppServerClient:
                                      stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                      bufsize=1, env=run_env, creationflags=flags)
         self.responses: "queue.Queue[dict]" = queue.Queue()
+        self.on_notification = None
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         self._next = 0
@@ -125,6 +126,11 @@ class AppServerClient:
                 continue
             if "id" in msg and ("result" in msg or "error" in msg):
                 self.responses.put(msg)
+            elif "method" in msg and "id" not in msg and self.on_notification:
+                try:
+                    self.on_notification(msg)
+                except Exception:
+                    pass
 
     def request(self, method: str, params: dict | None = None) -> dict:
         """``params=None`` omits the field (older Codex versions expect *unit* params)."""
