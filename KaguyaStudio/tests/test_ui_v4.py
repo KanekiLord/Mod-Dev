@@ -69,8 +69,9 @@ class UiSmoke(unittest.TestCase):
         w = MainWindow(self.store, self.engine)
         w.resize(1366, 740)
         w.show()
-        self.addCleanup(w.close)
         self.addCleanup(w.deleteLater)
+        self.addCleanup(w.detach)
+        self.addCleanup(lambda: [self.engine.wait(p["id"], 30) for p in self.store.projects()])
         return w
 
     def pump(self, cond, timeout=30):

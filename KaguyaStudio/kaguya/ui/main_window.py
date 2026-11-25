@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
+import sys
 import time
 
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -84,7 +86,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.store, self.engine, self.demo = store, engine, demo
         self.bridge: Bridge = bridge()
-        engine.subscribe(self.bridge.listener)
+        # Tag events with their engine so a window only reacts to its own engine (and stops
+        # reacting once closed).
+        self._engine_tag = id(engine)
+        self._listener = lambda d: self.bridge.event.emit({**d, "_engine": self._engine_tag})
+        engine.subscribe(self._listener)
         self.bridge.event.connect(self.on_event)
         self.pid: int | None = store.get_setting("ui.last_project")
         if self.pid is not None and not any(p["id"] == self.pid for p in store.projects()):
@@ -603,6 +609,22 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ events
     def on_event(self, ev: dict):
+        if ev.get("_engine") != self._engine_tag:
+            return
+        try:
+            self._handle_event(ev)
+        except sqlite3.Error as exc:  # never let a storage hiccup break the UI loop
+            print(f"Kaguya: evento ignorado ({ev.get('type')}): {exc}", file=sys.stderr)
+
+    def detach(self):
+        if self._listener in self.engine.listeners:
+            self.engine.listeners.remove(self._listener)
+        try:
+            self.bridge.event.disconnect(self.on_event)
+        except (RuntimeError, TypeError):
+            pass
+
+    def _handle_event(self, ev: dict):
         t = ev["type"]
         if ev.get("pid") not in (None, self.pid) and t not in ("diagnosis", "usage"):
             if t in ("task_done", "worker_idle", "task_started"):
@@ -674,4 +696,5 @@ class MainWindow(QMainWindow):
         for m in self.mascots.values():
             if m.window:
                 m.window.close()
+        self.detach()
         super().closeEvent(e)

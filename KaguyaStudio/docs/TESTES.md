@@ -34,7 +34,21 @@ Capturas reais da aplicação (modo demonstração, CLIs simuladas, rotulado na 
 
 Roda em `windows-latest`: suíte completa (incluindo as CLIs oficiais instaladas via npm, **sem conta**),
 capturas 100–200% com renderização do Windows, build PyInstaller e teste de fumaça do `.exe`.
-Resultado da execução: ver a seção "Resultado do CI" no relatório da entrega.
+
+**Execução de 25/11/2026 (Windows Server 2025, Python 3.12): todos os passos com sucesso.**
+
+- 53 testes OK, incluindo as CLIs reais no Windows:
+  - Claude Code 2.1.331 encontrado em `C:\npm\prefix\claude.CMD` (launcher npm `.cmd`) → "Não autenticado",
+    com a correção sugerida; execução headless real → falha reportada com o motivo exato
+    `Not logged in · Please run /login` (sessão lida do stream-json).
+  - codex-cli 0.172.0 em `C:\npm\prefix\codex.CMD` → "Não autenticado"; `exec` fora do Git chegou à API
+    (401 reportado como falha, não como "executada"); limites → "indisponível" sem login.
+- Capturas renderizadas pelo Windows a 100/125/150/200% (artefato `capturas-windows`). O runner tem tela
+  pequena, então a janela ficou no tamanho mínimo (1180 px lógicos) — também é um teste do layout compacto.
+- Executável `KaguyaStudio.exe` gerado (ZIP de 67 MB, artefato `KaguyaStudio-windows`) e aberto no teste
+  de fumaça, renderizando a página Diagnóstico sem Python instalado no caminho do app.
+- Problema encontrado pelo CI e corrigido: janelas antigas continuavam recebendo eventos de outros
+  motores (ponte de eventos global) — agora cada janela só reage ao seu motor e se desliga ao fechar.
 
 ## NÃO testado (depende do seu computador/contas)
 
