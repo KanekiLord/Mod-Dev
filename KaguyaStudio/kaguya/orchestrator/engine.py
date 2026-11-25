@@ -75,6 +75,12 @@ class Engine:
         self.store = store
         self.home = Path(home or data_dir())
         self.desktop_command = server_command()
+        from ..browser.mcp import server_command as browser_server_command
+        self.browser_command = browser_server_command()
+        # set by the UI: (agent, task_id) -> {"port", "token"} or None, and the matching release(token)
+        self.browser_bridge = None
+        self.browser_release = None
+        self._browser_tokens: dict[int, str] = {}
         self.env = env
         self.listeners: list[Listener] = [listener] if listener else []
         self.diagnoses: dict[str, Diagnosis] = {}
@@ -180,7 +186,7 @@ class Engine:
     # ----------------------------------------------------------------- queue
     def submit(self, pid: int, intent: Intent, *, write: bool = False, web: bool = True, commands: bool = False,
                mcp: bool = False, run_tests: bool = False, autonomous: bool = False, desktop: bool = False,
-               context: str = "", attachments: list[str] | None = None) -> int:
+               context: str = "", attachments: list[str] | None = None, browser: bool = False) -> int:
         if autonomous:
             # autonomous = everything needed to finish the task without asking (Git restore point first)
             write = commands = run_tests = True
@@ -191,7 +197,7 @@ class Engine:
         tid = self.store.enqueue(pid, intent.target, intent.text, intent.kind, allow_write=write, allow_web=web,
                                  allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous,
                                  desktop=desktop and intent.target != "paralelo", context=context,
-                                 attachments=attachments)
+                                 attachments=attachments, browser=browser and intent.target in ("codex", "claude"))
         self.store.append_event(tid, "user", intent.text, "user")
         if intent.kind == "idea":
             ob = self.outbox(pid)
@@ -264,6 +270,9 @@ class Engine:
                 self.store.append_event(task["id"], "error", summary + "\n" + traceback.format_exc()[-3000:])
             if task.get("desktop"):
                 self._finish_desktop(pid, task["id"])
+            tok = self._browser_tokens.pop(task["id"], None)
+            if tok and self.browser_release:
+                self.browser_release(tok)   # the assistant loses browser access the moment the task ends
             if rt.cancel.is_set() and status not in ("approved",):
                 status = "cancelled"
                 summary = summary or "Interrompido pelo usuário."
@@ -312,11 +321,38 @@ class Engine:
             if (self.env or {}).get(k):
                 env[k] = self.env[k]
         desk = {"command": list(self.desktop_command), "env": env}
-        cfg = self._logs(pid, task["id"]) / "mcp-desktop.json"
+        return self._write_mcp_config(pid, task, desk=desk)
+
+    def _write_mcp_config(self, pid: int, task: dict, desk: dict | None = None, browser: dict | None = None) -> dict:
+        """One config file listing the Studio's own MCP servers for this task (Claude reads it with --mcp-config)."""
+        cfg = self._logs(pid, task["id"]) / "mcp-studio.json"
         cfg.parent.mkdir(parents=True, exist_ok=True)
-        cfg.write_text(json.dumps(claude_desktop_config(desk), ensure_ascii=False, indent=1), encoding="utf-8")
-        desk["config_file"] = str(cfg)
-        return desk
+        old = {}
+        try:
+            old = json.loads(cfg.read_text(encoding="utf-8")).get("mcpServers", {})
+        except (OSError, ValueError):
+            pass
+        new = claude_desktop_config(desk, browser)["mcpServers"]
+        cfg.write_text(json.dumps({"mcpServers": {**old, **new}}, ensure_ascii=False, indent=1), encoding="utf-8")
+        spec = desk or browser
+        spec["config_file"] = str(cfg)
+        return spec
+
+    def _browser_opts(self, pid: int, task: dict) -> dict | None:
+        """Kaguya Browser tools for this task: a token valid only while it runs, bound to this assistant."""
+        agent = task["target"]
+        if not task.get("browser") or agent not in ("codex", "claude") or self.browser_bridge is None:
+            return None
+        info = self.browser_bridge(agent, task["id"])
+        if not info:
+            return None
+        self._browser_tokens[task["id"]] = info["token"]
+        env = {"KAGUYA_BROWSER_PORT": str(info["port"]), "KAGUYA_BROWSER_TOKEN": info["token"],
+               "KAGUYA_BROWSER_AGENT": agent}
+        if not getattr(sys, "frozen", False):
+            from ..appdirs import APP_ROOT
+            env["PYTHONPATH"] = str(APP_ROOT)
+        return self._write_mcp_config(pid, task, browser={"command": list(self.browser_command), "env": env})
 
     def _finish_desktop(self, pid: int, tid: int) -> None:
         base = self.home / "desktop"
@@ -463,7 +499,7 @@ class Engine:
                 "extra": attached_context(task.get("context") or "", self._images(task)),
                 "autonomous": bool(task.get("autonomous")),
                 "desktop": self._desktop_window(pid) if task.get("desktop") else None,
-                "pc": self.store.is_pc(pid),
+                "pc": self.store.is_pc(pid), "browser": bool(task.get("browser")),
                 "agents": agents, "web": bool(task["allow_web"]), "max_subagents": int(self.setting("economy.max_subagents"))}
 
     # ----------------------------------------------------------------- modes
@@ -480,6 +516,7 @@ class Engine:
         opts = RunOptions(write=write, commands=bool(task["allow_commands"]), web=bool(task["allow_web"]),
                           autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
                           pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid), images=self._images(task),
+                          browser=self._browser_opts(pid, task),
                           mcp=bool(task["allow_mcp"]), resume=resume, in_git=in_git, workdir=str(cwd),
                           model=self.setting(f"models.{agent}") or None)
         self.store.set_stage(task["id"], "execucao")

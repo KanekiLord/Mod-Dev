@@ -25,6 +25,8 @@ class TabShare:
     readers: set[str] = field(default_factory=set)
     controllers: set[str] = field(default_factory=set)   # allowed to take control
     controller: str = "user"                              # who holds control now
+    held: bool = False                                    # the user took over: assistants wait until handed back
+    owner: str = ""                                       # research tab opened by an assistant ("" = user's tab)
     since: dict[str, str] = field(default_factory=dict)
     timeline: list[tuple[str, str, str]] = field(default_factory=list)   # (time, who, what)
 
@@ -83,6 +85,7 @@ class ShareRegistry:
                 if agent not in t.readers:
                     raise AccessDenied("Compartilhe a aba antes de permitir o controle.")
                 t.controllers.add(agent)
+                t.held = False
                 self.log(tab_id, "user", f"permitiu que {NAMES[agent]} controle esta aba (supervisionado)")
             elif agent in t.controllers:
                 t.controllers.discard(agent)
@@ -99,7 +102,10 @@ class ShareRegistry:
                     prev = t.controller
                     t.controller = "user"
                     self.log(tab_id, "user", f"assumiu o controle (de {NAMES.get(prev, prev)})")
+                t.held = True
                 return
+            if t.held:
+                raise AccessDenied("O usuário assumiu o controle desta aba. Pare e espere ele devolver.")
             if who not in t.controllers:
                 self.log(tab_id, who, "tentou controlar a aba sem permissão (negado)")
                 raise AccessDenied(f"{NAMES.get(who, who)} não tem permissão para controlar esta aba.")
@@ -110,14 +116,31 @@ class ShareRegistry:
                 self.log(tab_id, who, "assumiu o controle da aba")
 
     def check_control(self, tab_id: int, agent: str, what: str) -> None:
+        """The first action of an allowed assistant takes control (if nobody else holds it)."""
         with self._lock:
             t = self.tab(tab_id)
             if agent not in t.controllers:
                 self.log(tab_id, agent, f"tentou '{what}' sem permissão (negado)")
                 raise AccessDenied(f"{NAMES.get(agent, agent)} não pode controlar esta aba.")
             if t.controller != agent:
-                raise AccessDenied("Quem está no controle agora é " + NAMES.get(t.controller, t.controller) + ".")
+                self.take_control(tab_id, agent)
         self.log(tab_id, agent, what)
+
+    def give_back(self, tab_id: int) -> None:
+        with self._lock:
+            t = self.tab(tab_id)
+            if t.held:
+                t.held = False
+                self.log(tab_id, "user", "devolveu o controle")
+
+    def stop_control(self, tab_id: int | None = None) -> None:
+        """'Parar': every assistant loses control (sharing for reading stays)."""
+        with self._lock:
+            ids = [tab_id] if tab_id is not None else list(self._tabs)
+            for i in ids:
+                for a in list(self.tab(i).controllers):
+                    self.allow_control(i, a, False)
+                self.tab(i).controller = "user"
 
     def release(self, tab_id: int) -> None:
         with self._lock:

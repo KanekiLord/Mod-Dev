@@ -59,6 +59,7 @@ class RunOptions:
     workdir: str | None = None
     extra_dirs: list[str] = field(default_factory=list)
     images: list[str] = field(default_factory=list)   # files attached by the user (e.g. a captured video frame)
+    browser: dict | None = None  # {"command", "env", "config_file"} → Kaguya Browser tools (shared tabs only)
 
 
 def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
@@ -85,6 +86,8 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         allowed += WEB_TOOLS
     if opts.desktop:
         allowed.append("mcp__" + DESKTOP_SERVER)
+    if opts.browser:
+        allowed.append("mcp__" + BROWSER_SERVER)
     if not caps.flags or caps.has("--allowedTools") or caps.has("--allowed-tools"):
         cmd += ["--allowedTools", ",".join(allowed)]
     denied = []
@@ -94,7 +97,7 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         denied += WRITE_TOOLS
     if not opts.web:
         denied += WEB_TOOLS
-    if not opts.mcp and not opts.desktop:
+    if not opts.mcp and not opts.desktop and not opts.browser:
         denied.append("mcp__*")
     denied += SENSITIVE_DENY
     if opts.autonomous or opts.pc:
@@ -105,10 +108,11 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["--disallowedTools", ",".join(denied)]
     if opts.model:
         cmd += ["--model", opts.model]
-    if opts.desktop and (not caps.flags or caps.has("--mcp-config")):
-        cmd += ["--mcp-config", str(opts.desktop["config_file"])]
+    studio_mcp = opts.desktop or opts.browser   # both write the same config file listing the Studio's servers
+    if studio_mcp and (not caps.flags or caps.has("--mcp-config")):
+        cmd += ["--mcp-config", str(studio_mcp["config_file"])]
         if not opts.mcp:
-            cmd.append("--strict-mcp-config")  # only the Studio's desktop server, none of the user's MCPs
+            cmd.append("--strict-mcp-config")  # only the Studio's servers, none of the user's MCPs
     import os as _os
     dirs = list(opts.extra_dirs)
     for img in opts.images:   # Claude opens attached images with its Read tool: allow just their folder
@@ -130,6 +134,8 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["-c", "sandbox_workspace_write.network_access=true"]
     if opts.desktop and (not caps.flags or caps.has("--config") or caps.has("-c")):
         cmd += codex_desktop_config(opts.desktop)
+    if opts.browser and (not caps.flags or caps.has("--config") or caps.has("-c")):
+        cmd += codex_desktop_config(opts.browser, BROWSER_SERVER)
     if opts.web:
         cmd.append("--search")
     cmd.append("exec")
@@ -155,6 +161,7 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
 
 
 DESKTOP_SERVER = "kaguya_desktop"
+BROWSER_SERVER = "kaguya_browser"
 
 
 def _toml_str(value: str) -> str:
@@ -164,9 +171,9 @@ def _toml_str(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
 
 
-def codex_desktop_config(desktop: dict) -> list[str]:
+def codex_desktop_config(desktop: dict, server: str = DESKTOP_SERVER) -> list[str]:
     exe, *args = desktop["command"]
-    key = f"mcp_servers.{DESKTOP_SERVER}"
+    key = f"mcp_servers.{server}"
     env = ",".join(f"{k}={_toml_str(v)}" for k, v in sorted((desktop.get("env") or {}).items()))
     out = ["-c", f"{key}.command={_toml_str(exe)}",
            "-c", f"{key}.args=[{','.join(_toml_str(a) for a in args)}]",
@@ -177,10 +184,13 @@ def codex_desktop_config(desktop: dict) -> list[str]:
     return out
 
 
-def claude_desktop_config(desktop: dict) -> dict:
-    exe, *args = desktop["command"]
-    return {"mcpServers": {DESKTOP_SERVER: {"type": "stdio", "command": exe, "args": args,
-                                            "env": dict(desktop.get("env") or {})}}}
+def claude_desktop_config(desktop: dict | None, browser: dict | None = None) -> dict:
+    servers = {}
+    for name, spec in ((DESKTOP_SERVER, desktop), (BROWSER_SERVER, browser)):
+        if spec:
+            exe, *args = spec["command"]
+            servers[name] = {"type": "stdio", "command": exe, "args": args, "env": dict(spec.get("env") or {})}
+    return {"mcpServers": servers}
 
 
 def build_command(target: str, exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:

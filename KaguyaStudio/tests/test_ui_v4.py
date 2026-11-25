@@ -818,6 +818,147 @@ class BrowserUi(UiBase):
         self.assertEqual(self.store.get_task(later)["kind"], "later")
 
 
+class _Mcp:
+    """Talks to the real kaguya_browser MCP server process, as Claude Code / Codex would."""
+
+    def __init__(self, env: dict, pump):
+        import subprocess
+        import threading
+        self.pump = pump
+        root = str(Path(__file__).resolve().parents[1])
+        self.p = subprocess.Popen([sys.executable, "-m", "kaguya.browser.mcp"], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, text=True, encoding="utf-8", cwd=root,
+                                  env=dict(os.environ, PYTHONPATH=root, **env))
+        self.lines, self.n = [], 0
+        threading.Thread(target=lambda: [self.lines.append(json.loads(l)) for l in self.p.stdout], daemon=True).start()
+
+    def rpc(self, method, params=None, timeout=30):
+        self.n += 1
+        mid = self.n
+        self.p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": mid, "method": method, "params": params or {}}) + "\n")
+        self.p.stdin.flush()
+        assert self.pump(lambda: any(m.get("id") == mid for m in self.lines), timeout), f"sem resposta: {method}"
+        return next(m for m in self.lines if m.get("id") == mid)
+
+    def call(self, name, **args):
+        res = self.rpc("tools/call", {"name": name, "arguments": args})["result"]
+        return (not res["isError"]), res["content"][0]["text"]
+
+    def close(self):
+        self.p.stdin.close()
+        self.p.wait(10)
+        self.p.stdout.close()
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git") and _webengine(), "PySide6 WebEngine e git necessários")
+class BrowserControlUi(UiBase):
+    def test_supervised_control_through_the_real_mcp_server(self):
+        page_html = ("<html><head><title>Loja de Mods</title></head><body><main><h1>Mods</h1>"
+                     "<a href='/p2'>Próxima página</a> <input placeholder='Pesquisar mods' id='q'> "
+                     "<input type='password' placeholder='Senha'> "
+                     "<button onclick=\"document.title='COMPRADO'\">Comprar agora</button>"
+                     "<div style='height:3000px'></div></main></body></html>")
+        srv = _serve({"/loja": ("text/html; charset=utf-8", page_html),
+                      "/p2": ("text/html; charset=utf-8", "<title>Página 2</title><p>segunda</p>")})
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        w = self.window()
+        w.go("browser")
+        page = w.browser
+        url = f"http://127.0.0.1:{srv.server_port}/loja"
+        view = page.open_url(url)
+        self.assertTrue(self.pump(lambda: "Loja" in view.title(), 20))
+        tab = view.tab_id
+        page.set_share("claude", True)
+        info = w.engine.browser_bridge("claude", 1)                       # what the engine gives a Miwa task
+        mcp = _Mcp({"KAGUYA_BROWSER_PORT": str(info["port"]), "KAGUYA_BROWSER_TOKEN": info["token"]}, self.pump)
+        self.addCleanup(mcp.close)
+        self.assertEqual(mcp.rpc("initialize")["result"]["serverInfo"]["name"], "kaguya_browser")
+        names = [t["name"] for t in mcp.rpc("tools/list")["result"]["tools"]]
+        self.assertIn("browser_click", names)
+        ok, text = mcp.call("browser_tabs")
+        self.assertIn(f"aba {tab}: Loja de Mods", text)
+        self.assertIn("só leitura", text)
+        ok, text = mcp.call("browser_read", tab=tab)
+        self.assertTrue(ok)
+        self.assertIn("Próxima página", text)
+        ok, text = mcp.call("browser_click", tab=tab, element=1)
+        self.assertFalse(ok)                                               # shared ≠ controllable
+        self.assertIn("não pode controlar", text)
+        page.set_control("claude", True)
+        ok, els = mcp.call("browser_elements", tab=tab)
+        self.assertTrue(ok)
+        num = {line.split("] ", 1)[1].split(":")[0] + ":" + line.split(": ", 1)[1].split(" (")[0]: int(line[1:line.index("]")])
+               for line in els.splitlines()}
+        self.assertIn("(proibido digitar)", els)
+        ok, text = mcp.call("browser_type", tab=tab, element=num["senha:Senha"], text="123456")
+        self.assertFalse(ok)                                               # never passwords
+        self.assertIn("senha", text)
+        ok, text = mcp.call("browser_type", tab=tab, element=num["campo:Pesquisar mods"], text="geckolib")
+        self.assertTrue(ok, text)
+        got = {}
+        view.page().runJavaScript("document.getElementById('q').value", 0, lambda r: got.update(v=r))
+        self.assertTrue(self.pump(lambda: "v" in got, 10))
+        self.assertEqual(got["v"], "geckolib")
+        self.assertIn("Miwa está controlando", page.banner_label.text())
+        asked = []
+        page.confirm_hook = lambda msg: asked.append(msg) or False
+        ok, text = mcp.call("browser_click", tab=tab, element=num["botão:Comprar agora"])
+        self.assertFalse(ok)                                               # high impact: the user said no
+        self.assertIn("Comprar agora", asked[0])
+        self.assertNotEqual(view.title(), "COMPRADO")
+        # the user takes over: Miwa must wait; handing back lets her continue
+        page.take_over()
+        ok, text = mcp.call("browser_scroll", tab=tab, direction="down")
+        self.assertFalse(ok)
+        self.assertIn("assumiu o controle", text)
+        page.give_back()
+        ok, text = mcp.call("browser_click", tab=tab, element=num["link:Próxima página"])
+        self.assertTrue(ok, text)
+        self.assertTrue(self.pump(lambda: view.url().toString().endswith("/p2"), 10))
+        # research tab: isolated, owned by Miwa, visible to the user
+        ok, text = mcp.call("browser_research", url=f"http://127.0.0.1:{srv.server_port}/p2?pesquisa=1")
+        self.assertTrue(ok, text)
+        research = next(v for v in page.views.values() if page.shares.tab(v.tab_id).owner == "claude")
+        self.assertTrue(self.pump(lambda: "pesquisa=1" in research.url().toString() and research.title(), 10))
+        self.assertIn("🔎 Miwa", page.tabs.tabText(page.tabs.indexOf(research.frame)))
+        self.assertIs(research.page().profile(), page._profiles["agents"])          # isolated from your logins
+        self.assertFalse(any("pesquisa=1" in h["url"] for h in page.data.history()))  # not in your history
+        # Kaguya was never given anything
+        kag = w.engine.browser_bridge("codex", 2)
+        mk = _Mcp({"KAGUYA_BROWSER_PORT": str(kag["port"]), "KAGUYA_BROWSER_TOKEN": kag["token"]}, self.pump)
+        self.addCleanup(mk.close)
+        ok, text = mk.call("browser_read", tab=tab)
+        self.assertFalse(ok)
+        self.assertIn("não está compartilhada com Kaguya", text)
+        # Pausar tudo: control gone and the token dead
+        w.pause_all()
+        ok, text = mcp.call("browser_tabs")
+        self.assertFalse(ok)
+        self.assertIn("encerrado", text)
+        timeline = [what for _t, _w, what in page.shares.tab(tab).timeline]
+        self.assertTrue(any("bloqueado" in x for x in timeline))
+        self.assertTrue(any("recusou" in x for x in timeline))
+
+    def test_task_with_control_gets_the_browser_server(self):
+        from kaguya.messages import Intent
+        w = self.window()
+        w.go("browser")
+        pid = self.store.add_project("Projeto", self.project)
+        prompts = Path(self.tmp.name) / "prompts.jsonl"
+        self.engine.env["FAKE_PROMPT_LOG"] = str(prompts)
+        tid = self.engine.submit(pid, Intent("execute", "claude", "Leia a aba e resuma"), write=False, browser=True)
+        self.assertTrue(self.pump(lambda: self.store.get_task(tid)["status"] not in ("queued", "running"), 60))
+        rec = json.loads(prompts.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertIn("NAVEGADOR DO STUDIO", rec["prompt"])
+        args = rec["args"]
+        self.assertIn("mcp__kaguya_browser", args[args.index("--allowedTools") + 1])
+        cfg = json.loads(Path(args[args.index("--mcp-config") + 1]).read_text(encoding="utf-8"))
+        env = cfg["mcpServers"]["kaguya_browser"]["env"]
+        self.assertTrue(env["KAGUYA_BROWSER_TOKEN"])
+        self.assertIsNone(w.browser.bridge.tokens.agent(env["KAGUYA_BROWSER_TOKEN"]))   # dead after the task
+
+
 def tearDownModule():
     """Destroy every top-level window while QApplication still exists (Qt objects that survive until
     interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""

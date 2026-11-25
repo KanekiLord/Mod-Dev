@@ -884,6 +884,8 @@ class MainWindow(QMainWindow):
             self.sync_wake_ui()
             stopped.append("escuta por nome")
         self.voice.stop_speaking()
+        if hasattr(self, "browser"):
+            self.browser.stop_all()   # no assistant keeps control of any browser tab
         self.toast("Tudo pausado" + (f": {', '.join(stopped)}." if stopped else " (nada estava rodando).")
                    + " Tarefas interrompidas podem ser reenfileiradas na Fila.", 7000)
         return stopped

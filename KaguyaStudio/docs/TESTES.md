@@ -27,6 +27,26 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Etapa C — 5.5.0 (Kaguya Browser + YouTube Intelligence)
+
+- `test_browser.py`: endereço vs pesquisa; favoritos/histórico (anônima não grava, sem duplicar); compartilhamento por
+  aba e por IA, revogar na hora, linha do tempo; um controlador por aba, usuário assume e a IA **não retoma** até ele
+  devolver; "Parar"; detecção de prompt injection; contexto cercado; ações de alto impacto; YouTube (IDs, capítulos,
+  legendas json3/xml, janela do trecho, escolha da legenda, relatório honesto, nota); **anexo chega às duas IAs
+  cercado como dado, antes da TAREFA, com a imagem** (`--image` no Codex sem engolir o prompt; `--add-dir` só da pasta).
+- `test_ui_v4.py › BrowserUi` (navegador real QtWebEngine + servidor local): aba pessoal → recusar compartilhar não
+  envia nada; aceitar → tarefa com texto visível, **sem a senha digitada nem texto escondido**, alerta de injection,
+  resposta exibida no navegador; revogar; anônima fora do histórico; favorito. YouTube (página com a mesma estrutura
+  de dados): metadados e capítulos, **legendas lidas pelo mesmo caminho do player**, quadro capturado, tarefa com
+  níveis A/B/C e imagem, "para depois".
+- `test_ui_v4.py › BrowserControlUi` (**o servidor MCP real**, como o Claude/Codex o iniciam): só leitura nega clique;
+  com controle: lista elementos, **recusa campo de senha**, digita no campo de busca, "Comprar agora" pede confirmação e
+  a recusa bloqueia, usuário assume → IA bloqueada, devolve → link clicado, aba de pesquisa isolada fora do histórico,
+  Kaguya sem acesso, **Pausar tudo mata a chave**. Tarefa com controle recebe o servidor e a chave morre ao terminar.
+- CI Windows: o `.exe` também sobe `--mcp-browser` e recusa sem ponte.
+- **Não testado**: YouTube real (bloqueado no servidor de nuvem); Claude/Codex reais usando as ferramentas (precisam
+  da sua conta) — teste no seu PC: compartilhe uma aba, ligue "Pode controlar" e peça algo.
+
 ## Filtro de ruído — 5.4.0
 
 - `test_denoise.py`: processamento em pedaços de qualquer tamanho dá o mesmo resultado; ventilador cai ≥ 12 dB e um

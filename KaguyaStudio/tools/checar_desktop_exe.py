@@ -35,6 +35,18 @@ def main(exe: str, out_png: str) -> int:
     with open(out_png, "wb") as fh:
         fh.write(png)
     print(f"captura real de tela: {len(png)} bytes -> {out_png}")
+    # the browser tools server must start from the same .exe; without a Studio bridge it must refuse, not crash
+    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "browser_tabs", "arguments": {}}}]
+    b = subprocess.run([exe, "--mcp-browser"], input="\n".join(json.dumps(m) for m in msgs) + "\n",
+                       capture_output=True, text=True, timeout=120)
+    rb = {r["id"]: r for r in (json.loads(l) for l in b.stdout.splitlines() if l.strip())}
+    assert set(rb) == {1, 2, 3}, f"navegador: {b.stdout[:1000]} {b.stderr[-800:]}"
+    assert rb[1]["result"]["serverInfo"]["name"] == "kaguya_browser"
+    assert "browser_click" in [t["name"] for t in rb[2]["result"]["tools"]]
+    assert rb[3]["result"]["isError"]
+    print("servidor do navegador no .exe: OK (sem ponte, recusa corretamente)")
     return 0
 
 

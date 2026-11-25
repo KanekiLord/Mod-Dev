@@ -1,5 +1,43 @@
 # Changelog
 
+## 5.5.0 — 25/11/2026 (Etapa C: Kaguya Browser + YouTube Intelligence)
+
+### Novo — Navegador (menu › Navegador)
+- Navegador de verdade dentro do Studio: **abas**, voltar/avançar, barra de endereço que também pesquisa
+  (DuckDuckGo, Google, Bing ou YouTube), **favoritos** (☆), **histórico** com busca e "apagar", página inicial com os
+  favoritos, **aba anônima** (não grava histórico nem login) e downloads sempre com "salvar como" (programas pedem
+  confirmação). Seus logins ficam num perfil próprio na pasta de dados do Studio.
+- **Toda aba é pessoal**: nenhuma IA vê nada até você clicar em *Compartilhar com: Kaguya / Miwa* — por aba e por IA,
+  com moldura colorida, ● no título, faixa "compartilhada com Miwa desde 14:32" e **linha do tempo** de cada acesso.
+- **Perguntar sobre esta aba**: a IA recebe só título, endereço, o **texto visível** e o trecho que você selecionou —
+  nunca senhas, cookies, o que você digitou em formulários ou texto escondido na página. Vai como **dado não
+  confiável**: se a página tentar dar ordens à IA ("ignore as instruções…"), o Studio avisa e registra. A resposta
+  aparece no próprio navegador (e na Conversa).
+- **Controle supervisionado** (*Pode controlar: Kaguya / Miwa*): a IA rola, clica, digita e abre páginas **só
+  naquela aba**, uma IA por vez, pelas ferramentas `kaguya_browser` (servidor MCP do Studio, ponte só em 127.0.0.1
+  com chave que morre ao fim da tarefa). Faixa "Miwa está controlando esta aba" com **Assumir controle** (ela espera
+  até você devolver) e **Parar**; **Pausar tudo** também corta. **Nunca digita em campo de senha/cartão**; comprar,
+  publicar, enviar, apagar, entrar e baixar programas **pedem sua confirmação**. A IA pode abrir a própria **aba de
+  pesquisa** isolada (sem seus logins, fora do seu histórico), visível como "🔎 Miwa".
+
+### Novo — YouTube Intelligence (painel ao abrir um vídeo)
+- Mostra sempre **o que a IA realmente tem**: **A — metadados** (título, canal, data, duração, descrição e capítulos;
+  sem a página, o oEmbed oficial dá título e canal), **B — texto** (legendas que o próprio YouTube oferece, ou o painel
+  "Mostrar transcrição" aberto; com tempos) e **C — visual** (só quadros que **você** captura, com o tempo). A IA é
+  instruída a nunca dizer que viu/ouviu o vídeo.
+- Capítulos clicáveis (pulam o vídeo), **Analisar o vídeo**, **Estudar este trecho** (±45 s do ponto atual),
+  **Comparar com meu projeto** (versões, APIs, testes; sem alterar arquivos), **Criar nota** (rascunho em revisão no
+  Segundo Cérebro, com links de tempo) e **Para depois**. Sem player escondido, sem baixar vídeo/áudio.
+- Tarefas agora levam **anexos**: o conteúdo vai cercado como dado e as imagens chegam à IA (Codex `--image`,
+  Claude com acesso só à pasta da imagem).
+
+### Limitações conhecidas (honestas)
+- O YouTube bloqueia servidores de nuvem ("tráfego incomum"): a leitura da página do YouTube foi testada com uma
+  página que imita a estrutura de dados que ele entrega ao espectador, **não contra o YouTube real**. No seu PC ele
+  abre normalmente; se algum dado não vier, o painel diz "indisponível" em vez de inventar.
+- Alguns vídeos não entregam o texto das legendas para fora do player; aí o painel pede para abrir "Mostrar
+  transcrição".
+
 ## 5.4.0 — 25/11/2026 (filtro de ruído: ventilador e vento no microfone)
 
 ### Novo

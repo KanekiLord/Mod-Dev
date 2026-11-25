@@ -104,3 +104,104 @@ HIGH_IMPACT = re.compile(
 
 def is_high_impact(label: str) -> bool:
     return bool(HIGH_IMPACT.search(label or ""))
+
+
+# --------------------------------------------------------------------------- supervised control (run by the Studio)
+# Interactive elements get a number (data-kaguya-el) so the assistant can say "click [7]" without writing any script.
+ELEMENTS_JS = r"""
+(function (filter) {
+  filter = (filter || "").toLowerCase();
+  var sel = "a[href], button, input, select, textarea, [role=button], [role=link], [role=tab], [contenteditable=true]";
+  var out = [], n = 0;
+  document.querySelectorAll("[data-kaguya-el]").forEach(function (e) { e.removeAttribute("data-kaguya-el"); });
+  Array.from(document.querySelectorAll(sel)).forEach(function (e) {
+    var r = e.getBoundingClientRect(), st = getComputedStyle(e);
+    if (r.width < 2 || r.height < 2 || st.visibility === "hidden" || st.display === "none") return;
+    if (e.type === "hidden") return;
+    var label = (e.innerText || e.value || e.getAttribute("aria-label") || e.getAttribute("placeholder") ||
+                 e.getAttribute("title") || e.getAttribute("name") || e.getAttribute("href") || "").trim()
+                 .replace(/\s+/g, " ").slice(0, 90);
+    if (e.tagName === "INPUT" && (e.type === "text" || e.type === "search" || e.type === "email" || !e.type))
+      label = (e.getAttribute("aria-label") || e.getAttribute("placeholder") || e.getAttribute("name") || "").trim();
+    if (filter && label.toLowerCase().indexOf(filter) < 0) return;
+    n += 1;
+    e.setAttribute("data-kaguya-el", String(n));
+    var kind = e.tagName === "A" ? "link" : e.tagName === "BUTTON" || e.getAttribute("role") === "button" ? "botão" :
+               e.tagName === "SELECT" ? "lista" : e.tagName === "TEXTAREA" || e.isContentEditable ? "texto" :
+               e.type === "password" ? "senha" : e.type === "checkbox" ? "caixa" : e.type === "submit" ? "botão" : "campo";
+    out.push({i: n, kind: kind, label: label, visible: r.top < innerHeight && r.bottom > 0});
+    if (out.length >= 150) return;
+  });
+  return JSON.stringify(out);
+})(%s)
+"""
+
+DESCRIBE_JS = r"""
+(function (i) {
+  var e = document.querySelector('[data-kaguya-el="' + i + '"]');
+  if (!e) return JSON.stringify({exists: false});
+  var ac = (e.getAttribute("autocomplete") || "").toLowerCase();
+  return JSON.stringify({exists: true, tag: e.tagName, type: (e.type || "").toLowerCase(),
+    label: (e.innerText || e.value || e.getAttribute("aria-label") || e.getAttribute("placeholder") ||
+            e.getAttribute("title") || e.getAttribute("href") || "").trim().slice(0, 120),
+    href: e.getAttribute("href") || "", download: e.hasAttribute("download"),
+    submit: (e.type === "submit") || (e.tagName === "BUTTON" && !!e.form && (e.type || "submit") === "submit"),
+    secret: e.type === "password" || /cc-|one-time-code|password/.test(ac)});
+})(%s)
+"""
+
+CLICK_JS = r"""
+(function (i) {
+  var e = document.querySelector('[data-kaguya-el="' + i + '"]');
+  if (!e) return "missing";
+  e.scrollIntoView({block: "center"}); e.focus(); e.click(); return "ok";
+})(%s)
+"""
+
+TYPE_JS = r"""
+(function (i, text, submit) {
+  var e = document.querySelector('[data-kaguya-el="' + i + '"]');
+  if (!e) return "missing";
+  var ac = (e.getAttribute("autocomplete") || "").toLowerCase();
+  if (e.type === "password" || /cc-|one-time-code|password/.test(ac)) return "secret";
+  e.scrollIntoView({block: "center"}); e.focus();
+  if (e.isContentEditable) { e.innerText = text; }
+  else {
+    var proto = e.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    var setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+    setter.call(e, text);
+  }
+  e.dispatchEvent(new Event("input", {bubbles: true}));
+  e.dispatchEvent(new Event("change", {bubbles: true}));
+  if (submit) {
+    if (e.form && e.form.requestSubmit) e.form.requestSubmit();
+    else e.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", bubbles: true}));
+  }
+  return "ok";
+})(%s, %s, %s)
+"""
+
+SCROLL_JS = r"""
+(function (d) {
+  if (d === "top") scrollTo(0, 0); else if (d === "bottom") scrollTo(0, document.documentElement.scrollHeight);
+  else scrollBy(0, (d === "up" ? -0.8 : 0.8) * innerHeight);
+  return Math.round(scrollY) + "/" + Math.round(document.documentElement.scrollHeight);
+})(%s)
+"""
+
+
+def js(template: str, *args) -> str:
+    return template % tuple(json.dumps(a, ensure_ascii=False) for a in args)
+
+
+def format_elements(items: list[dict]) -> str:
+    if not items:
+        return "Nenhum link, botão ou campo visível (com esse filtro)."
+    lines = []
+    for e in items:
+        extra = " (proibido digitar)" if e["kind"] == "senha" else "" if e.get("visible") else " (fora da tela; role)"
+        lines.append(f"[{e['i']}] {e['kind']}: {e['label'] or '(sem texto)'}{extra}")
+    return "\n".join(lines)
+
+
+EXECUTABLE_LINK = re.compile(r"\.(exe|msi|bat|cmd|ps1|vbs|scr|jar|apk|dmg|zip)(\?|#|$)", re.I)

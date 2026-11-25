@@ -81,7 +81,13 @@ class Sharing(unittest.TestCase):
         r.check_control(1, "codex", "clicar em 'Próximo'")
         r.take_control(1, "user")                                  # user takes over at any moment
         with self.assertRaises(AccessDenied):
-            r.check_control(1, "codex", "clicar")
+            r.check_control(1, "codex", "clicar")                  # …and the assistant cannot grab it back
+        r.give_back(1)
+        r.check_control(1, "codex", "clicar de novo")              # handed back: first action retakes control
+        self.assertEqual(r.tab(1).controller, "codex")
+        r.stop_control(1)                                          # "Parar"
+        self.assertEqual((r.tab(1).controllers, r.tab(1).controller), (set(), "user"))
+        r.allow_control(1, "codex")
         r.share(1, "codex", False)                                 # unsharing also removes control
         self.assertNotIn("codex", r.tab(1).controllers)
 

@@ -7,6 +7,7 @@ browser. Personal tabs keep logins in the Studio's data folder; private tabs kee
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QRect, Qt, QTimer, QUrl
@@ -73,6 +74,9 @@ class BrowserPage(QWidget):
         self.last_answer: dict[int, str] = {}
         self._next_id = 1
         self._profiles: dict[str, object] = {}
+        self.bridge = None
+        self.confirm_hook = None          # tests: callable(message) -> bool instead of a dialog
+        self._dialogs: list = []
         self._started = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -114,15 +118,29 @@ class BrowserPage(QWidget):
         self.share_label = label("", "dim")
         self.share_btns = {}
         for a in ("codex", "claude"):
-            b = button(f"Compartilhar com {AGENT[a]['mascot']}", a, "chip", checkable=True,
+            b = button(AGENT[a]['mascot'], a, "chip", checkable=True,
                        tip=f"{AGENT[a]['mascot']} passa a poder ler ESTA aba quando você perguntar algo")
             b.clicked.connect(lambda on, a=a: self.set_share(a, on))
             self.share_btns[a] = b
+        self.control_btns = {}
+        for a in ("codex", "claude"):
+            b = button(AGENT[a]['mascot'], "window", "chip", checkable=True,
+                       tip=f"Controle supervisionado: {AGENT[a]['mascot']} pode rolar, clicar e digitar SÓ nesta aba "
+                           "(nunca senhas; compras/envios/logins pedem sua confirmação). Você assume quando quiser.")
+            b.clicked.connect(lambda on, a=a: self.set_control(a, on))
+            self.control_btns[a] = b
         self.timeline_btn = button("Linha do tempo", "clock", "ghost", "Quem acessou esta aba e quando", checkable=True)
         self.timeline_btn.clicked.connect(lambda on: self.timeline.setVisible(on))
-        strip.addWidget(self.share_label, 1)
-        for b in (*self.share_btns.values(), self.timeline_btn):
+        lay.addWidget(self.share_label)   # status on its own line (never cut)
+        strip.addWidget(label("Compartilhar com:", "dim"))
+        for b in self.share_btns.values():
             strip.addWidget(b)
+        strip.addSpacing(14)
+        strip.addWidget(label("Pode controlar:", "dim"))
+        for b in self.control_btns.values():
+            strip.addWidget(b)
+        strip.addStretch(1)
+        strip.addWidget(self.timeline_btn)
         lay.addLayout(strip)
         # ask strip
         ask = QHBoxLayout()
@@ -154,7 +172,9 @@ class BrowserPage(QWidget):
             f" background: {C['surface']}; color: {C['muted']}; }}"
             f" #browserTabs QTabBar::tab:selected {{ color: {C['text']}; border-bottom: 2px solid {C['gold']}; }}"
             f" #browserTabs QTabBar::close-button {{ image: url({_icon_path('x')}); subcontrol-position: right; }}"
-            f" #browserTabs QTabBar::close-button:hover {{ background: rgba(255,255,255,0.12); border-radius: 4px; }}")
+            f" #browserTabs QTabBar::close-button:hover {{ background: rgba(255,255,255,0.12); border-radius: 4px; }}"
+            f" #browserTabs QTabBar QToolButton {{ background: {C['surface2']}; border: 1px solid {C['border']};"
+            f" border-radius: 6px; }}")
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(lambda _i: self._sync())
         corner = QWidget()
@@ -167,6 +187,22 @@ class BrowserPage(QWidget):
         cl.addWidget(self.new_btn)
         cl.addWidget(self.priv_btn)
         self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
+        self.banner = QFrame()
+        self.banner.setObjectName("controlBanner")
+        bl = QHBoxLayout(self.banner)
+        bl.setContentsMargins(10, 6, 10, 6)
+        self.banner_label = label("", None, wrap=True)
+        self.take_btn = button("Assumir controle", "pause", "ghost", "Você volta a controlar; a IA espera")
+        self.take_btn.clicked.connect(self.take_over)
+        self.back_ctrl_btn = button("Devolver controle", "play", "ghost")
+        self.back_ctrl_btn.clicked.connect(self.give_back)
+        self.stop_ctrl_btn = button("Parar", "stop", "ghost", "Tira o controle de todas as IAs desta aba")
+        self.stop_ctrl_btn.clicked.connect(lambda: self.stop_control(self.current_id()))
+        bl.addWidget(self.banner_label, 1)
+        for b in (self.take_btn, self.back_ctrl_btn, self.stop_ctrl_btn):
+            bl.addWidget(b)
+        self.banner.hide()
+        ll.addWidget(self.banner)
         ll.addWidget(self.tabs, 1)
         self.answer = QTextBrowser()
         self.answer.setOpenExternalLinks(False)
@@ -179,7 +215,10 @@ class BrowserPage(QWidget):
         self.timeline.hide()
         ll.addWidget(self.timeline)
         self.split.addWidget(left)
-        self.side = self._youtube_panel()
+        from .page_work import scroll
+        self.side = scroll(self._youtube_panel())   # scrolls on small windows instead of squeezing the text
+        self.side.setMinimumWidth(310)
+        self.side.setMaximumWidth(400)
         self.split.addWidget(self.side)
         self.split.setStretchFactor(0, 1)
         self.side.hide()
@@ -200,14 +239,34 @@ class BrowserPage(QWidget):
         if not self._started and webengine_available():
             self._started = True
             self.new_tab(HOME)
+        self._ensure_bridge()
         self._sync()
 
-    def _profile(self, private: bool):
-        key = "private" if private else "personal"
+    def _ensure_bridge(self):
+        """Local bridge for the browser tools (127.0.0.1 only; created on the GUI thread)."""
+        if self.bridge is not None or not webengine_available():
+            return self.bridge
+        from ..browser.bridge import make_bridge
+        try:
+            self.bridge = make_bridge(self._tool, self)
+        except RuntimeError:
+            return None
+        bridge = self.bridge
+
+        def issue(agent, task_id):
+            if not self.shares.shared_tabs(agent) and not self.win.store.get_setting("browser.research", True):
+                return None
+            return {"port": bridge.port, "token": bridge.tokens.issue(agent, task_id)}
+        self.win.engine.browser_bridge = issue
+        self.win.engine.browser_release = bridge.tokens.revoke
+        return bridge
+
+    def _profile(self, private: bool, agents: bool = False):
+        key = "agents" if agents else "private" if private else "personal"
         if key not in self._profiles:
             from PySide6.QtWebEngineCore import QWebEngineProfile
-            if private:
-                prof = QWebEngineProfile(self)   # off-the-record: nothing written to disk
+            if private or agents:
+                prof = QWebEngineProfile(self)   # off-the-record: nothing written; assistants never see your logins
             else:
                 base = self.win.engine.home / "navegador" / "pessoal"
                 base.mkdir(parents=True, exist_ok=True)
@@ -219,7 +278,7 @@ class BrowserPage(QWidget):
             self._profiles[key] = prof
         return self._profiles[key]
 
-    def new_tab(self, url: str = HOME, private: bool = False, select: bool = True):
+    def new_tab(self, url: str = HOME, private: bool = False, select: bool = True, owner: str = ""):
         from PySide6.QtWebEngineCore import QWebEnginePage
         from PySide6.QtWebEngineWidgets import QWebEngineView
         studio = self
@@ -228,18 +287,22 @@ class BrowserPage(QWidget):
 
         class Page(QWebEnginePage):
             def createWindow(self, _type):   # target=_blank / window.open → new tab with the same privacy
-                return studio.new_tab("about:blank", private=private).page()
+                return studio.new_tab("about:blank", private=private, owner=owner).page()
 
         frame = QFrame()
         frame.setObjectName("browserFrame")
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(2, 2, 2, 2)
         view = QWebEngineView(frame)
-        view.setPage(Page(self._profile(private), view))
-        view.tab_id, view.private, view.frame = tab_id, private, frame
+        view.setPage(Page(self._profile(private, agents=bool(owner)), view))
+        view.tab_id, view.private, view.frame = tab_id, private or bool(owner), frame
+        if owner:   # research tab of an assistant: isolated profile, shared with and controlled by it, visible to you
+            self.shares.tab(tab_id).owner = owner
+            self.shares.share(tab_id, owner)
+            self.shares.allow_control(tab_id, owner)
         fl.addWidget(view)
         self.views[tab_id] = view
-        if private:
+        if private or owner:
             self.private.add(tab_id)
         view.titleChanged.connect(lambda _t, v=view: self._title(v))
         view.urlChanged.connect(lambda _u, v=view: self._url_changed(v))
@@ -298,10 +361,12 @@ class BrowserPage(QWidget):
         if i < 0:
             return
         t = view.title() or view.url().toString() or "Nova aba"
-        shared = self.shares.tab(view.tab_id).shared
-        self.tabs.setTabText(i, ("● " if shared else "") + ("🕶 " if view.private else "") + t[:26])
+        st = self.shares.tab(view.tab_id)
+        prefix = (f"🔎 {NAMES[st.owner]}: " if st.owner else ("● " if st.shared else "") +
+                  ("🕶 " if view.private else ""))
+        self.tabs.setTabText(i, prefix + t[:26])
         self.tabs.setTabToolTip(i, t)
-        if view.url().scheme() in ("http", "https"):
+        if view.url().scheme() in ("http", "https") and not st.owner:
             self.data.visit(view.url().toString(), view.title(), view.private)
 
     def _url_changed(self, view):
@@ -339,6 +404,29 @@ class BrowserPage(QWidget):
             b.blockSignals(True)
             b.setChecked(a in t.readers)
             b.blockSignals(False)
+        for a, b in self.control_btns.items():
+            b.blockSignals(True)
+            b.setChecked(a in t.controllers)
+            b.setEnabled(a in t.readers and not t.owner)
+            b.blockSignals(False)
+        acting = t.controller if t.controller != "user" else ""
+        if acting or t.held or t.owner:
+            if t.held:
+                text = "Você assumiu o controle desta aba. As IAs esperam até você devolver."
+            elif t.owner:
+                text = f"Aba de pesquisa da {NAMES[t.owner]} (isolada: sem seus logins)."
+            else:
+                text = f"{NAMES[acting]} está controlando esta aba. Você pode assumir ou parar a qualquer momento."
+            self.banner_label.setText(text)
+            color = AGENT[acting or t.owner]["color"] if (acting or t.owner) else C["gold"]
+            self.banner.setStyleSheet(f"#controlBanner {{ background: {C['surface2']}; border: 1px solid {color};"
+                                      f" border-radius: 8px; }}")
+            self.take_btn.setVisible(bool(acting) and not t.held)
+            self.back_ctrl_btn.setVisible(t.held)
+            self.stop_ctrl_btn.setVisible(bool(t.controllers))
+            self.banner.show()
+        else:
+            self.banner.hide()
         if t.readers:
             who = " e ".join(f"{NAMES[a]} (desde {t.since.get(a, '')})" for a in sorted(t.readers))
             self.share_label.setText(f"Esta aba está compartilhada com {who}.")
@@ -375,6 +463,40 @@ class BrowserPage(QWidget):
         self.shares.share(tab_id, agent, on)
         self._sync()
 
+    def set_control(self, agent: str, on: bool, tab_id: int | None = None):
+        tab_id = tab_id if tab_id is not None else self.current_id()
+        if tab_id is None:
+            return
+        try:
+            self.shares.allow_control(tab_id, agent, on)
+        except AccessDenied as exc:
+            self.win.toast(str(exc))
+        self._ensure_bridge()
+        self._sync()
+
+    def take_over(self):
+        tid = self.current_id()
+        if tid is not None:
+            self.shares.take_control(tid, "user")
+            self._sync()
+
+    def give_back(self):
+        tid = self.current_id()
+        if tid is not None:
+            self.shares.give_back(tid)
+            self._sync()
+
+    def stop_control(self, tab_id: int | None = None):
+        self.shares.stop_control(tab_id)
+        self._sync()
+
+    def stop_all(self):
+        """'Pausar tudo': no assistant controls any tab, and every browser token dies."""
+        self.shares.stop_control()
+        if self.bridge is not None:
+            self.bridge.tokens.revoke_all()
+        self._sync()
+
     def _ensure_shared(self, tab_id: int, agent: str, confirm=None) -> bool:
         if self.shares.can_read(tab_id, agent):
             return True
@@ -400,7 +522,8 @@ class BrowserPage(QWidget):
         return win.store.add_project("Pesquisas do navegador", folder)
 
     def _submit(self, agent: str, question: str, context: str, label_line: str, tab_id: int,
-                attachments: list[str] | None = None, kind: str = "execute", need_project: bool = False) -> int | None:
+                attachments: list[str] | None = None, kind: str = "execute", need_project: bool = False,
+                browser: bool = False) -> int | None:
         from ..messages import Intent
         pid = self._project(need_project)
         if pid is None:
@@ -409,7 +532,7 @@ class BrowserPage(QWidget):
             return None
         intent = Intent(kind=kind, target=agent, text=question.strip() + "\n\n" + label_line)
         tid = self.win.engine.submit(pid, intent, write=False, web=True, commands=False, context=context,
-                                     attachments=attachments)
+                                     attachments=attachments, browser=browser)
         if kind == "execute":
             self.pending[tid] = (tab_id, agent)
             self._poll.start()
@@ -443,8 +566,12 @@ class BrowserPage(QWidget):
             rep = self.reports.get(tid)
             if rep is not None:   # on a video page, the video report is attached too
                 ctx += "\n\n" + rep.context()
+            if agent in self.shares.tab(tid).controllers:
+                ctx += (f"\n\nCONTROLE: você pode agir nesta aba (id {tid}) com as ferramentas kaguya_browser, "
+                        "supervisionado pelo usuário.")
             task = self._submit(agent, question, ctx, pagemod.chat_label(snap), tid,
-                                attachments=[p for _t, p in rep.frames] if rep else None)
+                                attachments=[p for _t, p in rep.frames] if rep else None,
+                                browser=agent in self.shares.tab(tid).controllers)
             self.ask_edit.clear()
             if on_sent:
                 on_sent(task, ctx, findings)
@@ -747,3 +874,168 @@ class BrowserPage(QWidget):
                         source=rep.url, project=self.win.store.project(pid)["name"])
         self.win.toast(f"Nota em revisão no Segundo Cérebro: {note.name}")
         return note
+
+    # ------------------------------------------------------------ browser tools (called through the bridge)
+    def confirm_async(self, message: str, done):
+        """Ask the user without blocking the Studio (the assistant's tool call waits for the answer)."""
+        if self.confirm_hook is not None:
+            done(bool(self.confirm_hook(message)))
+            return
+        box = QMessageBox(QMessageBox.Question, "A IA quer fazer algo importante", message,
+                          QMessageBox.Yes | QMessageBox.No, self.window())
+        box.setDefaultButton(QMessageBox.No)
+        box.setWindowModality(Qt.NonModal)
+        box.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self._dialogs.append(box)
+
+        def finished(code):
+            self._dialogs.remove(box) if box in self._dialogs else None
+            done(code == QMessageBox.Yes)
+        box.finished.connect(finished)
+        box.open()
+        self.win.toast("Uma IA está pedindo confirmação no navegador.")
+
+    def _tool(self, agent: str, tool: str, args: dict, reply):
+        who = NAMES.get(agent, agent)
+
+        def view_of(tab):
+            try:
+                tab = int(tab)
+            except (TypeError, ValueError):
+                raise AccessDenied("Informe o número da aba (veja browser_tabs).")
+            v = self.views.get(tab)
+            if v is None:
+                raise AccessDenied(f"A aba {tab} não existe mais.")
+            return tab, v
+
+        def after_load(view, msg):
+            QTimer.singleShot(1200, self, lambda: reply(True, f"{msg}\nAgora: {view.title()} — {view.url().toString()}"))
+
+        try:
+            if tool == "browser_tabs":
+                rows = []
+                for tab_id in self.shares.shared_tabs(agent):
+                    v = self.views.get(tab_id)
+                    if v is None:
+                        continue
+                    t = self.shares.tab(tab_id)
+                    ctl = "pode controlar" if agent in t.controllers and not t.held else "só leitura"
+                    rows.append(f"aba {tab_id}: {v.title()[:80]} — {v.url().toString()} ({ctl}"
+                                + (", sua aba de pesquisa" if t.owner == agent else "") + ")")
+                self.shares.log(self.current_id() or 0, agent, "listou as abas compartilhadas")
+                reply(True, "\n".join(rows) if rows else "Nenhuma aba foi compartilhada com você. Use browser_research "
+                      "para abrir sua própria aba de pesquisa, se precisar.")
+                return
+            if tool == "browser_research":
+                url = to_url(str(args.get("url", "")), self.win.store.get_setting("browser.search", "duckduckgo"))
+                if pagemod.EXECUTABLE_LINK.search(url):
+                    reply(False, "Abrir downloads de programas não é permitido numa aba de pesquisa.")
+                    return
+                v = self.new_tab(url, select=False, owner=agent)
+                self.shares.log(v.tab_id, agent, f"abriu a aba de pesquisa {url}")
+                self.win.toast(f"{who} abriu uma aba de pesquisa: {url[:80]}")
+                after_load(v, f"Aba de pesquisa {v.tab_id} aberta.")
+                return
+            tab, v = view_of(args.get("tab"))
+            if tool == "browser_read":
+                self.shares.check_read(tab, agent, "leu o texto visível da página (ferramenta)")
+
+                def got(raw):
+                    ctx, findings = pagemod.build_context(pagemod.parse_snapshot(raw or "{}"), who, limit=14000)
+                    if findings:
+                        self.shares.log(tab, "user", "ALERTA: texto tentando dar ordens a IAs nesta página")
+                    reply(True, ctx)
+                v.page().runJavaScript(pagemod.EXTRACT_JS, 0, got)
+                return
+            if tool == "browser_elements":
+                self.shares.check_read(tab, agent, "listou links/botões/campos")
+                v.page().runJavaScript(pagemod.js(pagemod.ELEMENTS_JS, str(args.get("filter") or "")), 0,
+                                       lambda raw: reply(True, pagemod.format_elements(json.loads(raw or "[]"))))
+                return
+            if tool in ("browser_click", "browser_type"):
+                el = int(args.get("element", 0))
+                if agent not in self.shares.tab(tab).controllers:   # permission first, before touching the page
+                    self.shares.log(tab, agent, "tentou agir na aba sem permissão (negado)")
+                    raise AccessDenied(f"{who} não pode controlar esta aba (só leitura).")
+
+                def described(raw):
+                    d = json.loads(raw or "{}")
+                    if not d.get("exists"):
+                        reply(False, f"Elemento [{el}] não encontrado; chame browser_elements de novo.")
+                        return
+                    label_ = d.get("label") or d.get("href") or d.get("tag", "")
+                    if tool == "browser_type":
+                        if d.get("secret"):
+                            self.shares.log(tab, agent, f"tentou digitar num campo de senha/cartão [{el}] (bloqueado)")
+                            reply(False, "Proibido: este campo é de senha, cartão ou código. Peça ao usuário para "
+                                  "preencher ele mesmo.")
+                            return
+                        text = str(args.get("text", ""))
+                        submit = bool(args.get("submit"))
+                        action = f"digitar “{text[:60]}” em [{el}] {label_[:60]}" + (" e enviar" if submit else "")
+                    else:
+                        submit = bool(d.get("submit"))
+                        action = f"clicar em [{el}] {label_[:80]}"
+                    try:
+                        self.shares.check_control(tab, agent, action)
+                    except AccessDenied as exc:
+                        reply(False, str(exc))
+                        return
+                    risky = (submit or pagemod.is_high_impact(label_) or d.get("download")
+                             or bool(pagemod.EXECUTABLE_LINK.search(d.get("href") or "")))
+
+                    def go(ok: bool):
+                        if not ok:
+                            self.shares.log(tab, "user", f"recusou: {action}")
+                            reply(False, "O usuário NÃO autorizou esta ação. Não tente de novo; pergunte o que ele prefere.")
+                            return
+                        if risky:
+                            self.shares.log(tab, "user", f"autorizou: {action}")
+                        code = (pagemod.js(pagemod.TYPE_JS, el, str(args.get("text", "")), submit) if tool == "browser_type"
+                                else pagemod.js(pagemod.CLICK_JS, el))
+
+                        def done(r):
+                            if r == "secret":
+                                reply(False, "Proibido: campo de senha/cartão.")
+                            elif r != "ok":
+                                reply(False, f"Elemento [{el}] sumiu da página; chame browser_elements de novo.")
+                            else:
+                                after_load(v, f"Feito: {action}.")
+                        v.page().runJavaScript(code, 0, done)
+                    if risky:
+                        self.confirm_async(f"{who} quer {action}\n\nna página {v.title()[:80]}\n{v.url().toString()[:120]}"
+                                           "\n\nPermitir?", go)
+                    else:
+                        go(True)
+                v.page().runJavaScript(pagemod.js(pagemod.DESCRIBE_JS, el), 0, described)
+                return
+            if tool == "browser_scroll":
+                d = str(args.get("direction", "down"))
+                self.shares.check_control(tab, agent, f"rolou a página ({d})")
+                v.page().runJavaScript(pagemod.js(pagemod.SCROLL_JS, d), 0, lambda r: reply(True, f"Rolado ({d}); posição {r}."))
+                return
+            if tool == "browser_navigate":
+                url = to_url(str(args.get("url", "")), self.win.store.get_setting("browser.search", "duckduckgo"))
+                self.shares.check_control(tab, agent, f"abriu {url}")
+                if pagemod.EXECUTABLE_LINK.search(url):
+                    def nav(ok):
+                        if ok:
+                            v.load(QUrl(url))
+                            after_load(v, f"Abrindo {url}.")
+                        else:
+                            reply(False, "O usuário NÃO autorizou abrir esse download.")
+                    self.confirm_async(f"{who} quer abrir um download:\n{url}\n\nPermitir?", nav)
+                    return
+                v.load(QUrl(url))
+                after_load(v, f"Abrindo {url}.")
+                return
+            if tool == "browser_back":
+                self.shares.check_control(tab, agent, "voltou uma página")
+                v.back()
+                after_load(v, "Voltou.")
+                return
+            reply(False, f"Ferramenta desconhecida: {tool}")
+        except AccessDenied as exc:
+            reply(False, str(exc))
+        finally:
+            QTimer.singleShot(0, self, self._sync)

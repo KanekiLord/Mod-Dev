@@ -18,11 +18,11 @@ Estados: **validado_no_windows** (CI Windows real) · **validado_em_teste_local*
 | M08 | Validação e reuso entre agentes | parcial | aprendizados extraídos das tarefas → rascunhos; `memory_for` injeta trechos | **Etapa D**: revalidação (notas antigas/obsoletas), divergências |
 | M09 | Ler PDF/Office/ZIP/logs/imagens | parcial | as CLIs leem arquivos; não há leitor próprio do Studio | **Etapa D**: Leitor Universal (Office/ZIP seguros, trechos, limites) |
 | M10 | Observar janela autorizada | parcial | "Usar o PC": captura só da janela permitida, Parar, failsafe (`desktop/`) · CI real | indicador "Observação ativa" unificado (Etapa D) |
-| M11 | Navegador com abas e favoritos | parcial | só ChatGPT/Claude embutidos (`page_webchats.py`) | **Etapa C**: Kaguya Browser |
-| M12 | Aba compartilhada com agente | inexistente | — | **Etapa C** |
-| M13 | Ação supervisionada, um controlador por aba | inexistente | ("Usar o PC" já controla tela inteira com confirmação) | Etapa C (após M12) |
-| M14 | YouTube: metadados/timestamps | inexistente | — | **Etapa C** |
-| M15 | YouTube: texto e visual autorizados | inexistente | — | **Etapa C** |
+| M11 | Navegador com abas e favoritos | **feito (5.5.0)** | só ChatGPT/Claude embutidos (`page_webchats.py`) | **Etapa C**: Kaguya Browser |
+| M12 | Aba compartilhada com agente | **feito (5.5.0)** | — | **Etapa C** |
+| M13 | Ação supervisionada, um controlador por aba | **feito (5.5.0)** | ("Usar o PC" já controla tela inteira com confirmação) | Etapa C (após M12) |
+| M14 | YouTube: metadados/timestamps | **feito (5.5.0)** | — | **Etapa C** |
+| M15 | YouTube: texto e visual autorizados | **feito (5.5.0; YouTube real a validar no PC)** | — | **Etapa C** |
 | M16 | Perfis Kaguya/Miwa editáveis | parcial | `persona.py` + Configurações (4.9.0) · `test_persona` | **Etapa A**: editor completo (nome, controles, regras por tarefa, por projeto, exportar/importar) |
 | M17 | Voz/sprite/estilo separados | parcial | voz por IA (`voice/neural.py`), sprites por variante, persona separada | Etapa A: voz e visual dentro do editor |
 | M18 | Bandeja lateral (lingueta) | inexistente | — | **Etapa B**: Kaguya Music |

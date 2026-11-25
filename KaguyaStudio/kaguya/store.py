@@ -115,6 +115,8 @@ class Store:
                 db.execute("ALTER TABLE tasks ADD COLUMN context TEXT NOT NULL DEFAULT ''")
             if "attachments" not in cols:   # JSON list of image files the agent may open
                 db.execute("ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
+            if "browser" not in cols:   # may use the Kaguya Browser tools (only tabs the user lets it control)
+                db.execute("ALTER TABLE tasks ADD COLUMN browser INTEGER NOT NULL DEFAULT 0")
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema',?)", (str(SCHEMA_VERSION),))
 
     @contextmanager
@@ -230,18 +232,18 @@ class Store:
                 allow_write: bool = False, allow_web: bool = True, allow_commands: bool = False,
                 allow_mcp: bool = False, run_tests: bool = False, parent_id: int | None = None,
                 autonomous: bool = False, desktop: bool = False, context: str = "",
-                attachments: list[str] | None = None) -> int:
+                attachments: list[str] | None = None, browser: bool = False) -> int:
         if kind not in TASK_KINDS or target not in TARGETS:
             raise ValueError("Tipo ou destino não reconhecido")
         status = "queued" if kind == "execute" else "parked"
         with self.connection() as db:
             cur = db.execute(
                 "INSERT INTO tasks(project_id,parent_id,target,title,kind,status,created_at,allow_write,allow_web,"
-                "allow_commands,allow_mcp,run_tests,autonomous,desktop,context,attachments) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "allow_commands,allow_mcp,run_tests,autonomous,desktop,context,attachments,browser) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, parent_id, target, title, kind, status, now(), int(allow_write), int(allow_web),
                  int(allow_commands), int(allow_mcp), int(run_tests), int(autonomous), int(desktop),
-                 context or "", json.dumps(list(attachments or []), ensure_ascii=False)))
+                 context or "", json.dumps(list(attachments or []), ensure_ascii=False), int(browser)))
             return int(cur.lastrowid)
 
     def claim(self, pid: int) -> dict | None:
