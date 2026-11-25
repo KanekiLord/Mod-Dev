@@ -294,6 +294,79 @@ class CliCard(Card):
         self.win.go("chat")
 
 
+class GitHubCard(Card):
+    """GitHub CLI status: install, login (official browser flow) and account shown — never the token."""
+
+    def __init__(self, win):
+        super().__init__(accent=C["text"])
+        self.win = win
+        head = QHBoxLayout()
+        head.addWidget(icon_label("git", C["text"], 24))
+        t = label("GitHub", "h2")
+        head.addWidget(t)
+        head.addWidget(label("GitHub CLI oficial (gh) • login pelo navegador", "dim"))
+        head.addStretch(1)
+        self.state = Pill("não verificado", C["muted"])
+        head.addWidget(self.state)
+        self.lay.addLayout(head)
+        self.info = label("Clique em Diagnosticar.", "muted", wrap=True)
+        self.info.setTextFormat(Qt.RichText)
+        self.lay.addWidget(self.info)
+        row = QHBoxLayout()
+        b = button("Diagnosticar", "pulse", "primary")
+        b.clicked.connect(self.run)
+        self.b_login = button("Entrar no GitHub", "key", tip="Abre 'gh auth login --web' no terminal; você autoriza no navegador")
+        self.b_login.clicked.connect(self.login)
+        inst = button("Instalar GitHub CLI", "external", "ghost")
+        inst.clicked.connect(lambda: open_url("https://cli.github.com/"))
+        pick = button("Escolher executável…", "folder-open", "ghost")
+        pick.clicked.connect(self.pick)
+        for w in (b, self.b_login, inst, pick):
+            row.addWidget(w)
+        row.addStretch(1)
+        self.lay.addLayout(row)
+
+    def display(self, st):
+        if st is None:
+            return
+        color = {"pronto": C["success"], "nao_autenticado": C["warning"], "nao_instalado": C["danger"]}.get(st.state, C["danger"])
+        self.state.set(st.label, color)
+        rows = []
+        if st.executable:
+            rows.append(f"<b>Executável:</b> <code>{st.executable}</code>" + (f" • {st.version}" if st.version else ""))
+        rows += [f"<span style='color:{C['muted']}'>• {d}</span>" for d in st.details]
+        rows += [f"<span style='color:{C['gold']}'>→ {f}</span>" for f in st.fixes]
+        self.info.setText("<br>".join(rows))
+        self.b_login.setEnabled(bool(st.executable))
+
+    def run(self):
+        self.state.set("verificando…", C["violet"])
+        run_bg(lambda: self.win.refresh_github_status(), lambda st: self.display(st))
+
+    def login(self):
+        from ..github import login_command
+        st = self.win.gh_status
+        if not st or not st.executable:
+            return
+        import subprocess as _sp
+        args = login_command(st.executable)
+        try:
+            if os.name == "nt":
+                _sp.Popen(["cmd.exe", "/k", _sp.list2cmdline(args)], creationflags=getattr(_sp, "CREATE_NEW_CONSOLE", 0))
+            else:
+                discovery.open_interactive("gh", st.executable)
+            self.win.toast("Conclua o login no navegador e depois clique em Diagnosticar.")
+        except Exception as exc:
+            QMessageBox.information(self, "GitHub", f"Rode no terminal: {' '.join(args)}\n\n({exc})")
+
+    def pick(self):
+        filt = "Executáveis (*.exe *.cmd *.bat);;Todos (*)" if os.name == "nt" else ""
+        path = pick_file(self, "Executável da GitHub CLI (gh)", "", filt)
+        if path:
+            self.win.store.set_setting("cli.gh.path", path)
+            self.run()
+
+
 class DiagnosticsPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -309,6 +382,8 @@ class DiagnosticsPage(QWidget):
         self.cards = {a: CliCard(win, a) for a in ("codex", "claude")}
         for c in self.cards.values():
             lay.addWidget(c)
+        self.gh_card = GitHubCard(win)
+        lay.addWidget(self.gh_card)
         q = Card()
         q.lay.addWidget(label("VERIFICAÇÕES DO PROJETO", "section"))
         q.lay.addWidget(label("Checagens feitas pelo próprio Studio (não pelas IAs). Testes executam código do repositório e "
@@ -335,6 +410,7 @@ class DiagnosticsPage(QWidget):
     def refresh(self):
         for a, c in self.cards.items():
             c.display(self.win.engine.diagnoses.get(a))
+        self.gh_card.display(self.win.gh_status)
 
     def quality(self, tests: bool):
         if self.win.pid is None:

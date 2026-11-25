@@ -14,7 +14,7 @@ def make_fake_clis(folder: Path) -> dict[str, str]:
     """Create ``codex`` and ``claude`` launchers (``.cmd`` on Windows, like npm does)."""
     folder.mkdir(parents=True, exist_ok=True)
     paths = {}
-    for name in ("codex", "claude"):
+    for name in ("codex", "claude", "gh"):
         if os.name == "nt":
             p = folder / f"{name}.cmd"
             p.write_text(f'@"{sys.executable}" "{FAKE}" {name} %*\r\n', encoding="utf-8")

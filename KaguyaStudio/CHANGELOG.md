@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.0 — 25/11/2026
+
+### Novo — integração com o GitHub (CLI oficial `gh`)
+- Diagnóstico › **GitHub**: instalação, conta conectada e login oficial pelo navegador (`gh auth login --web`).
+  O Studio nunca lê, mostra ou grava o token.
+- Barra do projeto › **GitHub**: Publicar (repositório **privado** por padrão), Salvar versão (commit),
+  Enviar (push), Atualizar (pull só *fast-forward*, recusa se houver alterações sem commit), Criar pull request
+  de outro ramo (útil para os ramos do modo PARALELO) e Abrir no navegador. Mostra ↑ a enviar, ↓ a receber, ✎ sem commit.
+- Nada vai para o GitHub sem o seu clique; as IAs continuam proibidas de fazer commit/push sozinhas.
+
 ## 4.0.2 — 25/11/2026
 
 ### Corrigido

@@ -19,7 +19,7 @@ from ..store import Store
 from ..usage import claude_snapshot
 from ..vault.todo import read_todo
 from . import theme
-from .common import Bridge, bridge, open_path, run_bg
+from .common import Bridge, bridge, open_path, open_url, run_bg
 from .dialogs import ProjectDialog, QuickChat
 from .mascot import Mascot
 from .page_chat import ChatPage
@@ -123,6 +123,8 @@ class MainWindow(QMainWindow):
             m.open_chat.connect(self.quick_chat)
             m.open_studio.connect(self.bring_to_front)
         self.task_started_at: float | None = None
+        self.gh_status = None
+        self.repo_state = None
         self._build()
         self.voice = VoiceController(self)
         self._codex_busy = False
@@ -130,6 +132,7 @@ class MainWindow(QMainWindow):
         self._limits_timer.timeout.connect(lambda: self.refresh_codex_limits())
         self._limits_timer.start()
         QTimer.singleShot(3500, lambda: self.refresh_codex_limits())
+        QTimer.singleShot(2500, lambda: run_bg(self.refresh_github_status))
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -256,6 +259,10 @@ class MainWindow(QMainWindow):
         self.p_git_btn.clicked.connect(self.create_git_repo)
         self.p_git_btn.hide()
         row.addWidget(self.p_git_btn)
+        self.p_gh = button("GitHub", "git", tip="Publicar, salvar versão, enviar e atualizar pelo GitHub")
+        self.p_gh.clicked.connect(self.github_menu)
+        self.p_gh.hide()
+        row.addWidget(self.p_gh)
         row.addWidget(self.p_vault)
         edit = button("", "edit", "ghost", "Editar projeto (pastas, vault, testes)")
         edit.clicked.connect(self.edit_project)
@@ -500,6 +507,9 @@ class MainWindow(QMainWindow):
         else:
             self.p_git.set("sem Git: só leitura", C["warning"])
         self.p_git_btn.setVisible(chk.ok and not chk.git_root)
+        self.p_gh.setVisible(bool(chk.git_root))
+        if chk.git_root:
+            self.refresh_repo_state()
         vault = self.store.effective_vault(self.pid)
         if vault and Path(vault).is_dir():
             self.p_vault.set("Obsidian ✓" + (" (próprio)" if p.get("vault") else ""), C["violet"])
@@ -648,6 +658,131 @@ class MainWindow(QMainWindow):
             run_bg(lambda a=a: self.engine.diagnose(a, cwd), lambda d: (self.refresh_status(),
                    self.diag.refresh() if self.stack.currentWidget() is self.diag else None))
 
+    # ------------------------------------------------------------------ github
+    def refresh_github_status(self):
+        """Runs in a worker thread: diagnose the GitHub CLI (never asks for the token)."""
+        from ..github import diagnose
+        self.gh_status = diagnose(self.store.get_setting("cli.gh.path") or None, env=self.engine.env)
+        return self.gh_status
+
+    def refresh_repo_state(self, fetch: bool = False):
+        from ..github import repo_status
+        if self.pid is None:
+            return
+        folder = self.store.project(self.pid)["directory"]
+        pid = self.pid
+
+        def done(rs):
+            if pid != self.pid:
+                return
+            self.repo_state = rs
+            if rs.github_repo:
+                sync = []
+                if rs.ahead:
+                    sync.append(f"↑{rs.ahead}")
+                if rs.behind:
+                    sync.append(f"↓{rs.behind}")
+                if rs.changed:
+                    sync.append(f"✎{rs.changed}")
+                self.p_gh.setText("GitHub " + (" ".join(sync) if sync else "✓"))
+                self.p_gh.setToolTip(f"{rs.github_repo} • ramo {rs.branch}\n↑ commits a enviar • ↓ a receber • ✎ arquivos sem commit")
+            else:
+                self.p_gh.setText("Publicar no GitHub" if rs.is_git else "GitHub")
+                self.p_gh.setToolTip("Este repositório ainda não está no GitHub")
+        run_bg(lambda: repo_status(folder, fetch=fetch), done)
+
+    def github_menu(self):
+        from PySide6.QtWidgets import QMenu
+        rs = self.repo_state
+        menu = QMenu(self)
+        if rs and not rs.remote_url:
+            menu.addAction(theme.icon("external", C["text"]), "Publicar no GitHub (privado)…", self.gh_publish)
+        menu.addAction(theme.icon("check", C["text"]), "Salvar versão (commit)…", self.gh_commit)
+        if rs and rs.remote_url:
+            menu.addAction(theme.icon("send", C["text"]), "Enviar para o GitHub (push)", lambda: self.gh_action("push"))
+            menu.addAction(theme.icon("download", C["text"]), "Atualizar do GitHub (pull)", lambda: self.gh_action("pull"))
+            if rs.branch and rs.branch not in ("main", "master"):
+                menu.addAction(theme.icon("git", C["text"]), f"Criar pull request de '{rs.branch}'", lambda: self.gh_action("pr"))
+            menu.addAction(theme.icon("refresh", C["text"]), "Verificar sincronização", lambda: self.refresh_repo_state(fetch=True))
+            if rs.web_url:
+                menu.addAction(theme.icon("globe", C["text"]), "Abrir no navegador", lambda: open_url(rs.web_url))
+        menu.exec(self.p_gh.mapToGlobal(self.p_gh.rect().bottomLeft()))
+
+    def _need_gh(self) -> str | None:
+        st = self.gh_status or self.refresh_github_status()
+        if not st.ready:
+            QMessageBox.information(self, "GitHub", "A GitHub CLI não está pronta: " + " ".join(st.details + st.fixes) +
+                                    "\n\nVeja Diagnóstico › GitHub.")
+            self.go("diag")
+            return None
+        return st.executable
+
+    def gh_publish(self):
+        from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLineEdit, QVBoxLayout
+        from ..github import publish, suggest_repo_name
+        gh = self._need_gh()
+        if not gh:
+            return
+        folder = self.store.project(self.pid)["directory"]
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Publicar no GitHub")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(label(f"Conta: <b>{self.gh_status.login}</b>", wrap=True))
+        lay.addWidget(label("Nome do repositório", "section"))
+        name = QLineEdit(suggest_repo_name(folder))
+        lay.addWidget(name)
+        desc = QLineEdit()
+        desc.setPlaceholderText("Descrição (opcional)")
+        lay.addWidget(desc)
+        private = QCheckBox("Repositório privado (recomendado)")
+        private.setChecked(True)
+        lay.addWidget(private)
+        lay.addWidget(label("Os commits atuais serão enviados. Arquivos ignorados pelo .gitignore (build, run, logs) não sobem.",
+                            "muted", wrap=True))
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if not dlg.exec():
+            return
+        self.toast("Publicando no GitHub…")
+        run_bg(lambda: publish(folder, gh, name.text().strip(), private.isChecked(), desc.text()), self._gh_done)
+
+    def gh_commit(self):
+        from PySide6.QtWidgets import QInputDialog
+        from ..github import commit_all
+        rs = self.repo_state
+        n = rs.changed if rs else 0
+        msg, ok = QInputDialog.getText(self, "Salvar versão (commit)", f"{n} arquivo(s) alterado(s). Descreva a versão:")
+        if not ok:
+            return
+        folder = self.store.project(self.pid)["directory"]
+        run_bg(lambda: commit_all(folder, msg), self._gh_done)
+
+    def gh_action(self, kind: str):
+        from .. import github as ghm
+        folder = self.store.project(self.pid)["directory"]
+        if kind == "pr":
+            gh = self._need_gh()
+            if not gh:
+                return
+            fn = lambda: ghm.create_pr(folder, gh)
+        elif kind == "push":
+            fn = lambda: ghm.push(folder)
+        else:
+            fn = lambda: ghm.pull(folder)
+        self.toast({"push": "Enviando…", "pull": "Atualizando…", "pr": "Criando pull request…"}[kind])
+        run_bg(fn, self._gh_done)
+
+    def _gh_done(self, res):
+        if res.ok:
+            self.toast(res.message + (f"  {res.url}" if res.url else ""))
+            if res.url and "/pull/" in res.url:
+                open_url(res.url)
+        else:
+            QMessageBox.warning(self, "GitHub", res.message)
+        self.refresh_repo_state()
+
     # ------------------------------------------------------------------ limits
     def _attempt(self, agent: str, ok: bool, message: str = ""):
         from datetime import datetime as _dt
@@ -787,6 +922,7 @@ class MainWindow(QMainWindow):
             self.refresh_projects()
             self.refresh_status()
             self.refresh_codex_limits()
+            self.refresh_repo_state()
             if self.stack.currentWidget() is self.queue:
                 self.queue.refresh()
         elif t in ("queued", "worker_idle"):

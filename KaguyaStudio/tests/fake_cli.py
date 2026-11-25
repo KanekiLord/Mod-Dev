@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 name = sys.argv[1]
 args = sys.argv[2:]
@@ -158,4 +159,33 @@ if name == "codex":
                                                  "text": "Implementado pelo Codex. " + last}})
         out({"type": "turn.completed", "usage": {"input_tokens": 300, "cached_input_tokens": 20, "output_tokens": 80}})
         sys.exit(0)
+    print("unsupported", file=sys.stderr); sys.exit(2)
+
+if name == "gh":
+    if args[:1] == ["--version"]:
+        print("gh version 2.89.0 (2026-03-26)"); sys.exit(0)
+    if args[:2] == ["auth", "status"]:
+        if "--show-token" in args or "-t" in args:
+            print("FALHA: o Studio nunca deve pedir o token", file=sys.stderr); sys.exit(9)
+        mode = os.environ.get("FAKE_GH_AUTH", "ok")
+        hosts = {} if mode == "none" else {"github.com": [{"state": "success", "active": True, "host": "github.com",
+                                                           "login": "kaguya-teste", "gitProtocol": "https"}]}
+        print(json.dumps({"hosts": hosts})); sys.exit(0)
+    if args[:2] == ["repo", "create"]:
+        repo = args[2]
+        remotes = os.environ["FAKE_GH_REMOTES"]
+        bare = os.path.join(remotes, repo + ".git")
+        if os.path.exists(bare):
+            print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr); sys.exit(1)
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
+        src = args[args.index("--source") + 1]
+        url = f"https://github.com/kaguya-teste/{repo}.git"
+        subprocess.run(["git", "-C", src, "config", f"url.{Path(bare).as_uri()}.insteadOf", url], check=True)
+        subprocess.run(["git", "-C", src, "remote", "add", "origin", url], check=True)
+        if "--push" in args:
+            br = subprocess.run(["git", "-C", src, "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "-C", src, "push", "-q", "-u", "origin", br], check=True)
+        print(f"https://github.com/kaguya-teste/{repo}"); sys.exit(0)
+    if args[:2] == ["pr", "create"]:
+        print("https://github.com/kaguya-teste/repo/pull/1"); sys.exit(0)
     print("unsupported", file=sys.stderr); sys.exit(2)
