@@ -29,7 +29,7 @@ from .theme import AGENT, C
 from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
-NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
+NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("music", "music", "Kaguya Music"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
        ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(str(theme.asset("branding/kaguya.ico"))))
         self.resize(1480, 920)
         self.setMinimumSize(1180, 720)
-        self.mascots = {a: Mascot(a, engine.home / f"mascote_{a}.json") for a in ("codex", "claude")}
+        self.mascots = {a: Mascot(a, engine.home / f"mascote_{a}.json", self) for a in ("codex", "claude")}
         self.apply_persona_names()
         from .page_chat import set_portrait_source
         from .widgets import load_sprite
@@ -135,6 +135,11 @@ class MainWindow(QMainWindow):
         self.task_started_at: float | None = None
         self.gh_status = None
         self.repo_state = None
+        from ..music.library import MusicLibrary
+        from ..music.player import MusicPlayer
+        self.music = MusicPlayer(MusicLibrary(engine.home / "musica.sqlite3"), store, self)
+        from .music_dock import MusicDock
+        self.music_dock = MusicDock(self, self.music)
         self._build()
         self.voice = VoiceController(self)
         self._codex_busy = False
@@ -173,6 +178,8 @@ class MainWindow(QMainWindow):
         from .assistant_ui import AssistantWatcher
         self.assistant = AssistantWatcher(self)
         self._later(0, lambda: self.go(self.store.get_setting("ui.start_page", "home")))
+        if self.store.get_setting("music.dock.visible", True) and not demo:
+            self._later(800, lambda: self.music_dock.show())
         self._wake_resume = False
         self.setup_tray()
         self.refresh_all()
@@ -219,7 +226,9 @@ class MainWindow(QMainWindow):
         self.persona_page = PersonaPage(self)
         from .page_home import HomePage
         self.home = HomePage(self)
-        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page,
+        from .page_music import MusicPage
+        self.music_page = MusicPage(self)
+        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)
@@ -771,6 +780,13 @@ class MainWindow(QMainWindow):
         if self.pid is None:
             QMessageBox.information(self, "Projeto", "Vincule primeiro a pasta de um projeto.")
             return False
+        if not forced and not quick:
+            reply = self.music_command(text)
+            if reply:  # music commands are handled locally: no AI call, no tokens
+                self.chat.view.message("user", text)
+                self.chat.view.message("studio", "♪ " + reply)
+                self.chat.composer.edit.clear()
+                return True
         raw = f"{forced}: {text}" if forced else text
         try:
             intent = classify_message(raw, target)
@@ -813,6 +829,38 @@ class MainWindow(QMainWindow):
             self.chat.composer.edit.clear()
         self.refresh_status()
         return True
+
+    def bridge_call(self, fn, *args, timeout: float = 5.0):
+        """Run ``fn`` on the UI thread from a worker thread and wait for its result (Qt objects live there)."""
+        import threading
+        from PySide6.QtCore import QThread
+        if QThread.currentThread() is self.thread():
+            return fn(*args)
+        box, done = {}, threading.Event()
+
+        def run():
+            try:
+                box["v"] = fn(*args)
+            finally:
+                done.set()
+        self.bridge.call.emit(run)
+        done.wait(timeout)
+        return box.get("v")
+
+    def music_command(self, text: str) -> str | None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from ..live.wake import detect_name
+        return self.music.handle_text(detect_name(text)[1] or text, open_url=lambda u: QDesktopServices.openUrl(QUrl(u)))
+
+    def set_music_dock_visible(self, on: bool):
+        self.store.set_setting("music.dock.visible", bool(on))
+        if on:
+            self.music_dock.show()
+            self.music_dock.raise_()
+        else:
+            self.music_dock.hide()
+            self.toast("Bandeja de música escondida — volta pela página Kaguya Music ou pelo ícone perto do relógio.")
 
     def pause_all(self):
         """Panic button: stop every assistant activity now (tasks, computer control, Live, name listener, speech)."""
@@ -1040,7 +1088,8 @@ class MainWindow(QMainWindow):
             agent=agent, make_conversation=make,
             transcribe=lambda audio: self.voice.transcriber.transcribe(audio, NAMES_PROMPT),
             say=self.voice.say, stop_speech=self.voice.stop_speaking, speech_busy=lambda: bool(q and q.busy),
-            on_event=on_event, on_task=on_task, input_device=self.voice.input_index())
+            on_event=on_event, on_task=on_task, input_device=self.voice.input_index(),
+            local_command=lambda text: self.bridge_call(self.music_command, text))
         try:
             self.live_session.start()
         except Exception as exc:
@@ -1364,7 +1413,7 @@ class MainWindow(QMainWindow):
             self.wake.bubble.deleteLater()
         # top-level helper windows have no parent (they must stay visible when the Studio is minimized):
         # delete them explicitly so nothing outlives the main window
-        for attr in ("desktop_overlay", "live_window"):
+        for attr in ("desktop_overlay", "live_window", "music_dock"):
             wdg = getattr(self, attr, None)
             if wdg is not None:
                 if attr == "desktop_overlay":
@@ -1465,6 +1514,8 @@ class MainWindow(QMainWindow):
         self.tray_wake.toggled.connect(lambda on: self.set_wake(on))
         menu.addAction("Modo Live", lambda: (self.show_from_tray(), self.start_live(None)))
         menu.addAction("Mostrar/ocultar mascotes", lambda: [m.toggle_window() for m in self.mascots.values()])
+        menu.addAction("Mostrar/ocultar Kaguya Music",
+                       lambda: self.set_music_dock_visible(not self.music_dock.isVisible()))
         menu.addAction("Pausar tudo", self.pause_all)
         menu.addSeparator()
         menu.addAction("Sair", self.quit_app)
@@ -1525,6 +1576,8 @@ class MainWindow(QMainWindow):
             self._hotkey.stop()
         if self.desktop_overlay is not None:
             self.desktop_overlay.close()
+        self.music.player.stop()
+        self.music_dock.close()
         self.wake.stop()
         self.wake.bubble.close()
         self.voice.shutdown()

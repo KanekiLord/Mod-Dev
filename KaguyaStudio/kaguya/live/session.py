@@ -50,7 +50,8 @@ class LiveSession:
                  say: Callable[[str, str], bool], stop_speech: Callable[[], None], speech_busy: Callable[[], bool],
                  on_event: Callable[[dict], None], on_task: Callable[[str, str], None] | None = None,
                  input_device: int | None = None, wake: bool = False,
-                 quick_transcribe: Callable[[np.ndarray], str] | None = None, follow_up_s: float = 12.0):
+                 quick_transcribe: Callable[[np.ndarray], str] | None = None, follow_up_s: float = 12.0,
+                 local_command: Callable[[str], str | None] | None = None):
         self.agent = agent
         self._make, self._transcribe = make_conversation, transcribe
         self._say, self._stop_speech, self._speech_busy = say, stop_speech, speech_busy
@@ -69,6 +70,7 @@ class LiveSession:
         # follow-up window lets the user keep talking without repeating the name
         self.wake = wake
         self._quick = quick_transcribe
+        self._local = local_command   # e.g. music commands: answered without any AI call
         self.follow_up_s = follow_up_s
         self._awake_until = 0.0
 
@@ -266,6 +268,14 @@ class LiveSession:
             self._stop_speech()
             self._state("listening")
             return
+        if self._local is not None:
+            from .wake import detect_name
+            reply = self._local(detect_name(text)[1] or text)
+            if reply:
+                self._emit({"type": "caption", "role": "assistant", "agent": self.agent, "text": reply, "final": True})
+                self._say(reply, self.agent)
+                self._state("listening")
+                return
         self._respond(text)
 
     def _conversation(self, agent: str):

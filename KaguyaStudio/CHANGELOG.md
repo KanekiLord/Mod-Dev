@@ -1,5 +1,30 @@
 # Changelog
 
+## 5.1.0 — 25/11/2026 (Etapa B: Kaguya Music)
+
+### Novo
+- **Bandeja lateral de música**: uma lingueta fina presa na borda da tela (direita ou esquerda) que, ao clicar, **abre
+  na horizontal** para dentro da tela com capa, título, artista, fonte, tempo/progresso (com busca), aleatório, anterior,
+  tocar/pausar, próxima, repetir (fila/uma), volume e fila. Passar o mouse destaca e mostra o que está tocando; fecha
+  sozinha ao sair (ou fica **fixada**); arraste a lingueta para cima/baixo; tudo é lembrado. Funciona com o Studio
+  minimizado ou na bandeja do Windows. Mostrar/ocultar pela página ou pelo ícone perto do relógio.
+- **Player local de verdade** (Qt Multimedia/FFmpeg, já incluso): MP3, FLAC, WAV, OGG/Opus, M4A/AAC, WMA. Biblioteca em
+  SQLite com as pastas que você escolher (nada é copiado nem alterado), título/artista/capa lidos do arquivo, busca,
+  favoritas, contagem de reprodução, **playlists** e fila. Página **Kaguya Music** no menu.
+- **Comandos por texto e voz, sem gastar IA**: "toca Blue Bird", "toca a playlist Foco", "pausa a música", "próxima",
+  "volume 30%", "abaixa a música", "que música é essa", "coloca X na fila". Funcionam na conversa, no Live e no
+  "chamar pelo nome" ("Kaguya, pausa a música").
+- **Ducking**: enquanto a Kaguya ou a Miwa falam, a música baixa (25% por padrão, ajustável) e **volta sempre** —
+  fim normal, interrupção ou erro. Só o volume do player do Studio muda; o volume do Windows não é tocado.
+- **YouTube, Spotify, Amazon Music**: "coloca uma abertura de Naruto no YouTube" abre a busca oficial para você escolher;
+  na bandeja, a fonte "Windows" usa as teclas de mídia do próprio Windows (tocar/pausar, próxima, anterior) no app que
+  estiver tocando. O Studio não toca vídeos escondidos, não lê o que esses apps tocam e não manda comandos de voz ao
+  Spotify (regra da plataforma).
+
+### Corrigido
+- Mascotes e player agora pertencem à janela principal: nunca são destruídos fora da thread da interface (evitava um
+  travamento raro ao fechar).
+
 ## 5.0.0 — 25/11/2026 (Etapa A do pacote de evolução)
 
 Auditoria do pacote × código atual em `docs/AUDITORIA_PACOTE_2026-11-25.md` (matriz de lacunas com evidências).

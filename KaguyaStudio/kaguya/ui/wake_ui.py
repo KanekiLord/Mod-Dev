@@ -186,6 +186,7 @@ class WakeController:
             on_event=lambda ev: win.bridge.call.emit(lambda ev=ev: self.on_event(ev)),
             on_task=lambda text, a, scope="project": win.bridge.call.emit(lambda: self.on_task(text, a, scope)),
             input_device=win.voice.input_index(), wake=True,
+            local_command=lambda text: win.bridge_call(win.music_command, text),
             follow_up_s=float(win.store.get_setting("wake.follow_up_s", 12)))
         try:
             self.session.start()

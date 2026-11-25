@@ -93,8 +93,8 @@ class Mascot(QObject):
     open_chat = Signal(str)
     open_studio = Signal()
 
-    def __init__(self, agent: str, prefs_path: Path):
-        super().__init__()
+    def __init__(self, agent: str, prefs_path: Path, parent=None):
+        super().__init__(parent)  # owned by the main window: destroyed on the UI thread, never by a GC elsewhere
         self.agent = agent
         self.prefs_path = prefs_path
         self.prefs = self._load_prefs()

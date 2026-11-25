@@ -159,9 +159,13 @@ class UiSmoke(UiBase):
         self.assertEqual(w.nav_buttons["chat"].text(), "Conversa")
 
     def test_kaguya_v2_is_default_and_v1_still_available(self):
+        from PySide6.QtCore import QObject
         from kaguya.ui.mascot import Mascot
+        owner = QObject()
+        self.addCleanup(self._flush_deletes)
+        self.addCleanup(owner.deleteLater)
         home = Path(os.environ["KAGUYA_HOME"])
-        m = Mascot("codex", home / "m.json")
+        m = Mascot("codex", home / "m.json", owner)
         self.assertEqual(m.prefs.variant, "v2")
         self.assertIn("dormindo", m.profile["expressions"])
         m.set_state("limit")
@@ -173,7 +177,7 @@ class UiSmoke(UiBase):
             self.assertFalse(m.image().isNull())
         m.set_variant("v1")
         self.assertEqual(len(m.profile["expressions"]), 18)
-        self.assertEqual(Mascot("codex", home / "m.json").prefs.variant, "v1")  # persisted
+        self.assertEqual(Mascot("codex", home / "m.json", owner).prefs.variant, "v1")  # persisted
 
     def test_crisp_sprite_has_binary_alpha_and_files_untouched(self):
         from kaguya.appdirs import ASSETS
@@ -456,9 +460,13 @@ class PcModeUi(UiBase):
 @unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
 class TalkingMascots(UiBase):
     def test_talk_frames_cycle_while_speaking_then_stop(self):
+        from PySide6.QtCore import QObject
         from kaguya.ui.mascot import Mascot
+        owner = QObject()
+        self.addCleanup(self._flush_deletes)
+        self.addCleanup(owner.deleteLater)
         for agent, prefix in (("codex", "kaguya_v2/fala/"), ("claude", "miwa_v2/fala/")):
-            m = Mascot(agent, Path(self.tmp.name) / f"m_{agent}.json")
+            m = Mascot(agent, Path(self.tmp.name) / f"m_{agent}.json", owner)
             self.assertEqual(m.prefs.variant, "v2")
             for seq in m.talk_config()["sequences"]:
                 frames = m.talk_sequence(seq)
@@ -546,6 +554,55 @@ class HomeAndPause(UiBase):
         self.assertTrue(self.pump(lambda: not self.engine.is_running(pid), 30))
         self.assertIn(self.store.tasks(pid)[0]["status"], ("cancelled", "interrupted"))
         self.assertIn("Pausar tudo", control.stop_reason(self.engine.home / "desktop"))
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class MusicUi(UiBase):
+    def test_dock_tab_expands_pins_edges_and_chat_commands_skip_the_ai(self):
+        from tests.test_music import tone
+        root = Path(self.tmp.name) / "Músicas"
+        tone(root / "Ikimono-gakari - Blue Bird.wav")
+        tone(root / "Naruto Opening.wav")
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        w.music.lib.add_folder(root)
+        dock = w.music_dock
+        dock.show()
+        self.pump(lambda: True, 0.3)
+        self.assertEqual(dock.width(), 26)                       # only the thin tab is visible
+        tab = dock._tab_rect().center()
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        QTest.mouseClick(dock, Qt.LeftButton, pos=tab)
+        self.assertTrue(self.pump(lambda: dock.width() > 400, 3))  # click → slides open horizontally
+        geo = dock.screen().availableGeometry()
+        self.assertEqual(dock.geometry().right(), geo.right())    # still anchored to the right edge
+        dock.set_pinned(True)
+        dock.leaveEvent(None)
+        self.pump(lambda: False, 0.5)
+        self.assertGreater(dock.width(), 400)                     # pinned: stays open
+        dock.set_edge("left")
+        self.assertEqual(dock.geometry().left(), geo.left())
+        self.assertEqual(self.store.get_setting("music.dock.edge"), "left")
+        # chat: music command handled locally, no task created
+        before = len(self.store.tasks(pid))
+        self.assertTrue(w.send_message("toca Blue Bird", "equipe", ""))
+        self.assertEqual(len(self.store.tasks(pid)), before)
+        self.assertEqual(w.music.track.title, "Blue Bird")
+        self.assertTrue(w.send_message("volume 40%", "equipe", ""))
+        self.assertEqual(w.music.volume, 40)
+        # an assistant speaking lowers the music and restores it after
+        w.voice._on_queue_state("speaking", "codex")
+        self.assertTrue(w.music.ducked)
+        w.voice._on_queue_state("idle", "codex")
+        self.assertFalse(w.music.ducked)
+        w.voice._on_queue_state("speaking", "claude")
+        w.voice.stop_speaking()                                   # interrupted speech also restores
+        self.assertFalse(w.music.ducked)
+        w.go("music")
+        self.assertEqual(w.music_page.table.rowCount(), 2)
+        dock.set_pinned(False)
 
 
 def tearDownModule():

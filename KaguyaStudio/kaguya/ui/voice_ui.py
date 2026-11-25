@@ -69,8 +69,15 @@ class VoiceController(QObject):
         self.queue = SpeechQueue(synth, sounddevice_player(self.output_index), on_state)
         return self.queue
 
+    def _duck(self, on: bool):
+        """Lower Kaguya Music while an assistant talks; restored on every end (done, stopped, error)."""
+        music = getattr(self.win, "music", None)
+        if music is not None:
+            music.duck(on)
+
     def _on_queue_state(self, state: str, agent: str):
         m = self.win.mascots.get(agent)
+        self._duck(state == "speaking")
         if state == "speaking":
             self.win.chat.composer.speak_btn.setText("Parar voz")
             if m:
@@ -89,6 +96,7 @@ class VoiceController(QObject):
         return True
 
     def stop_speaking(self):
+        self._duck(False)
         if self.queue:
             self.queue.stop()
         self.speaker.stop()
@@ -111,6 +119,7 @@ class VoiceController(QObject):
         self.speaker.voice = self.voice_for(self._speaking_agent) if self.engine_name() == "windows" else ""
         self.speaker.output_device = None
         m = self.win.mascots.get(self._speaking_agent)
+        self._duck(True)
         if m:
             m.set_state("speaking")
         self.win.chat.composer.speak_btn.setText("Parar voz")
@@ -125,6 +134,7 @@ class VoiceController(QObject):
         return "codex"
 
     def _done_speaking(self):
+        self._duck(False)
         self.win.chat.composer.speak_btn.setText("Ouvir")
         m = self.win.mascots.get(self._speaking_agent or "")
         if m and m.state == "speaking":

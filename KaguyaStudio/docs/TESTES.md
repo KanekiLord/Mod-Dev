@@ -27,6 +27,18 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Etapa B — 5.1.0 (Kaguya Music)
+
+- `test_music.py`: varredura de pastas (ignora ocultas e não-áudio, sem duplicar), título/artista pelo nome do arquivo,
+  busca, playlists, favoritas, limpeza de arquivos apagados; comandos em português e frases que **não** são música
+  ("coloca o botão no menu", "coloca a tarefa X na fila"); **player real**: decodifica WAV pelo FFmpeg do Qt (duração
+  500 ms medida), passa sozinho para a próxima ao fim, volume 30% aplicado, ducking 25% de 30% e restauração,
+  YouTube abre a busca oficial.
+- `test_ui_v4.py › MusicUi`: a lingueta tem 26 px; clique abre na horizontal ancorada na borda; fixar mantém aberta;
+  trocar para a borda esquerda e persistir; "toca Blue Bird" e "volume 40%" na conversa não criam tarefa; fala da IA
+  baixa e restaura a música, inclusive quando interrompida; página lista a biblioteca.
+- Não testável aqui: som saindo na placa (o servidor não tem áudio) e as teclas de mídia em apps reais do Windows.
+
 ## Etapa A — 5.0.0
 
 - `test_persona.py`: padrões, controles e textos; conversão do formato 4.9.0; ajuste por projeto; nome personalizado
