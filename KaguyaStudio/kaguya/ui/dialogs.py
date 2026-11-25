@@ -307,12 +307,21 @@ class GitInitDialog(QDialog):
 
     def run(self):
         from ..gitsetup import init_repository
+        from .common import run_bg
         self.go.setEnabled(False)
-        self.out.setText("Criando…")
-        from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()
-        res = init_repository(Path(self.folder), gitignore=self.c_ignore.isChecked(), first_commit=self.c_commit.isChecked(),
-                              name=self.name.text(), email=self.email.text())
+        self.c_ignore.setEnabled(False)
+        self.c_commit.setEnabled(False)
+        self.out.setText("Criando… em pastas grandes o primeiro commit pode levar alguns minutos. A janela continua respondendo.")
+        folder, gi, fc = Path(self.folder), self.c_ignore.isChecked(), self.c_commit.isChecked()
+        name, email = self.name.text(), self.email.text()
+        run_bg(lambda: init_repository(folder, gitignore=gi, first_commit=fc, name=name, email=email), self._finished,
+               lambda exc, tb: self._finished(None, str(exc)))
+
+    def _finished(self, res, error: str = ""):
+        if res is None:
+            self.out.setText(f"<span style='color:{C['danger']}'>⚠ {error}</span>")
+            self.go.setEnabled(True)
+            return
         lines = "<br>".join(f"✓ {s}" for s in res.steps)
         if res.error:
             lines += f"<br><span style='color:{C['danger'] if not res.ok else C['warning']}'>⚠ {res.error}</span>"

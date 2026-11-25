@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.1.1 — 25/11/2026
+
+### Corrigido
+- **Login do GitHub não abria** ("'\\"C:\\Program Files\\GitHub CLI\\gh.EXE\\"' não é reconhecido"): o terminal era aberto
+  com aspas escapadas que o cmd.exe não entende. Afetaria também "Entrar" do Codex/Claude em pastas com espaços.
+  Agora o comando usa a forma de aspas do cmd (`cmd /k ""C:\\...\\gh.exe" auth login"`), validada num Windows real no CI.
+- **"Não está respondendo" ao criar o repositório Git**: o primeiro commit de uma pasta grande rodava na linha
+  da interface. Agora roda em segundo plano com aviso de progresso.
+
 ## 4.1.0 — 25/11/2026
 
 ### Novo — integração com o GitHub (CLI oficial `gh`)

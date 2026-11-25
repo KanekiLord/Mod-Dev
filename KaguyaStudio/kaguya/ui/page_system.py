@@ -348,13 +348,9 @@ class GitHubCard(Card):
         st = self.win.gh_status
         if not st or not st.executable:
             return
-        import subprocess as _sp
         args = login_command(st.executable)
         try:
-            if os.name == "nt":
-                _sp.Popen(["cmd.exe", "/k", _sp.list2cmdline(args)], creationflags=getattr(_sp, "CREATE_NEW_CONSOLE", 0))
-            else:
-                discovery.open_interactive("gh", st.executable)
+            discovery.open_console(args)
             self.win.toast("Conclua o login no navegador e depois clique em Diagnosticar.")
         except Exception as exc:
             QMessageBox.information(self, "GitHub", f"Rode no terminal: {' '.join(args)}\n\n({exc})")

@@ -387,29 +387,34 @@ def _codex_login(diag: Diagnosis, exe: str, cwd, runner, env, timeout) -> None:
     diag.details.append("Resposta inesperada de 'codex login status': " + redact(out)[:300])
 
 
+def console_command_line(args: list[str], keep_open: bool = True) -> str:
+    """Windows command line for a visible console.
+
+    ``cmd /k`` strips the first and last quote of the whole command when it starts with a quote,
+    so the full command is wrapped in one extra pair: ``cmd.exe /k ""C:\\Program Files\\x.exe" args"``.
+    Passing a *list* to Popen (as before) produced ``\\"`` escapes that cmd.exe does not understand,
+    which broke executables under paths with spaces (e.g. C:\\Program Files\\GitHub CLI\\gh.exe).
+    """
+    return f'cmd.exe {"/k" if keep_open else "/c"} "{subprocess.list2cmdline(args)}"'
+
+
+def open_console(args: list[str], cwd: str | None = None) -> None:
+    """Open a visible terminal running ``args`` (the user interacts there)."""
+    if os.name == "nt":
+        subprocess.Popen(console_command_line(args), cwd=cwd, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        return
+    for term in (["x-terminal-emulator", "-e"], ["gnome-terminal", "--"], ["xterm", "-e"], ["open", "-a", "Terminal"]):
+        if shutil.which(term[0]):
+            subprocess.Popen([*term, *args], cwd=cwd)
+            return
+    raise RuntimeError("Nenhum terminal encontrado; rode manualmente: " + " ".join(args))
+
+
 def open_login_terminal(target: str, executable: str, cwd: str | None = None) -> None:
     """Open a visible console running the official login command (the user types there)."""
-    args = [executable, *LOGIN_COMMANDS[target]]
-    if os.name == "nt":
-        subprocess.Popen(["cmd.exe", "/k", subprocess.list2cmdline(args)], cwd=cwd,
-                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-    else:
-        for term in (["x-terminal-emulator", "-e"], ["gnome-terminal", "--"], ["xterm", "-e"],
-                     ["open", "-a", "Terminal"]):
-            if shutil.which(term[0]):
-                subprocess.Popen([*term, *args], cwd=cwd)
-                return
-        raise RuntimeError("Nenhum terminal encontrado; rode manualmente: " + " ".join(args))
+    open_console([executable, *LOGIN_COMMANDS[target]], cwd)
 
 
 def open_interactive(target: str, executable: str, cwd: str | None = None) -> None:
     """Open the interactive CLI (for /status in Codex or /usage in Claude)."""
-    if os.name == "nt":
-        subprocess.Popen(["cmd.exe", "/k", subprocess.list2cmdline([executable])], cwd=cwd,
-                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-    else:
-        for term in (["x-terminal-emulator", "-e"], ["gnome-terminal", "--"], ["xterm", "-e"]):
-            if shutil.which(term[0]):
-                subprocess.Popen([*term, executable], cwd=cwd)
-                return
-        raise RuntimeError(f"Abra um terminal e rode: {executable}")
+    open_console([executable], cwd)
