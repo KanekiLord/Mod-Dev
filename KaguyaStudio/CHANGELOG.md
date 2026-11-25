@@ -1,5 +1,31 @@
 # Changelog
 
+## 4.4.0 — 25/11/2026
+
+### Novo
+- **Modo Live** (botão "Live" ao lado de "Falar", ou Ctrl+Shift+L): conversa por voz contínua com a Kaguya
+  (Codex) ou a Claude, numa janela própria com a mascote grande, legendas ao vivo e nível do microfone.
+  - O microfone fica ouvindo com detecção de fala (VAD com ruído de fundo adaptativo); a fala é transcrita
+    localmente (faster-whisper) e enviada a uma conversa que fica aberta — o Claude via
+    `--input-format stream-json` e o Codex via `app-server` —, então só a primeira resposta tem a partida do processo.
+  - A resposta começa a ser falada na primeira frase (voz neural Kokoro, se baixada; senão a voz do Windows).
+  - **Interromper falando por cima** (barge-in): a fala para e o turno é cancelado na própria CLI.
+  - Comandos falados: "falar com a Claude/Kaguya", "silêncio", "encerrar". Botões: Mudo, trocar IA,
+    Silenciar voz, Encerrar.
+  - Somente leitura: a IA pode consultar os arquivos do projeto, mas pedidos de alteração viram tarefas
+    **DEPOIS** na fila (nada é executado durante a conversa).
+  - Usa as assinaturas pelas CLIs oficiais (a voz realtime do Codex exige chave de API paga e não é usada).
+  - Limites do Claude informados pela própria CLI durante a conversa aparecem em Uso e limites.
+
+## 4.3.0 — 25/11/2026
+
+### Novo
+- **Vozes neurais locais (Kokoro)**, gratuitas e offline, baixadas só com sua autorização (≈ 120 MB,
+  arquivos verificados por SHA-256). Uma voz para cada IA (Kaguya e Claude) com mistura de estilos, e
+  "Ouvir amostra" em Configurações › Voz.
+- **Fala fluida**: o texto é dividido em frases e a próxima é sintetizada enquanto a anterior toca; parar
+  interrompe na hora. A voz do Windows continua como alternativa.
+
 ## 4.2.0 — 25/11/2026
 
 ### Novo

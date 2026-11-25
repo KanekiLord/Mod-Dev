@@ -37,7 +37,7 @@ class VoiceLogic(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
-class UiSmoke(unittest.TestCase):
+class UiBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -89,6 +89,10 @@ class UiSmoke(unittest.TestCase):
             time.sleep(0.02)
         return False
 
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class UiSmoke(UiBase):
     def test_link_project_dialog_and_persistence(self):
         from kaguya.ui.dialogs import ProjectDialog
         w = self.window()
@@ -177,3 +181,46 @@ class UiSmoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class LiveUi(UiBase):
+    def test_live_window_full_turn_with_fake_claude(self):
+        from unittest import mock
+        from kaguya.live.session import LiveSession
+        from kaguya.ui.live_window import LiveWindow
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        spoken = []
+        w.voice.say = lambda text, agent: spoken.append((agent, text)) or True
+        w.live_window = LiveWindow(w)
+        w.live_window.set_agent("claude")
+        w.live_window.show()
+        exes = {"claude": self.engine.ensure_ready("claude", str(self.project)),
+                "codex": RuntimeError("codex indisponível")}
+        with mock.patch.object(LiveSession, "_open_microphone", lambda self: None):
+            w._live_ready(exes, "claude", str(self.project))
+        self.assertIsNotNone(w.live_session)
+        w.live_session.handle_text("Oi, tudo bem?")
+        self.assertTrue(self.pump(lambda: bool(w.live_window.ai.text()), 30), w.live_window.err.text())
+        self.assertIn("Oi, tudo bem?", w.live_window.you.text())
+        self.assertTrue(self.pump(lambda: bool(spoken), 10))
+        self.assertTrue(all(a == "claude" for a, _ in spoken))
+        # the switch button reaches the session; the codex failure becomes a visible error
+        w.live_window.switch_btn.click()
+        self.assertTrue(self.pump(lambda: bool(w.live_window.err.text()), 10))
+        w.live_window.close()
+        self.assertIsNone(w.live_session)
+        self.assertIsNone(w.live_window)
+
+    def test_live_requires_transcription(self):
+        from unittest import mock
+        from kaguya.voice import stt
+        w = self.window()
+        fake = stt.VoiceStatus(recorder=False, transcriber=False, missing=["faster_whisper"], model_cached=False)
+        with mock.patch.object(stt, "status", return_value=fake), \
+                mock.patch("kaguya.ui.main_window.QMessageBox.information") as info:
+            w.start_live(None)
+        info.assert_called_once()
+        self.assertIsNone(w.live_window)

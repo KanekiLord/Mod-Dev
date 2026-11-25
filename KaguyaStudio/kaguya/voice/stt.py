@@ -104,8 +104,9 @@ class Transcriber:
                                            download_root=str(self.model_dir))
         return self._model
 
-    def transcribe(self, audio) -> str:
+    def transcribe(self, audio, prompt: str | None = None) -> str:
         if audio is None or len(audio) < SAMPLE_RATE // 4:
             return ""
-        segments, _info = self.load().transcribe(audio, language="pt", vad_filter=True, beam_size=1)
+        segments, _info = self.load().transcribe(audio, language="pt", vad_filter=True, beam_size=1,
+                                                 initial_prompt=prompt)
         return " ".join(s.text.strip() for s in segments).strip()

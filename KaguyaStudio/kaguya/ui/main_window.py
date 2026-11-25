@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, self.add_project)
         QShortcut(QKeySequence("Ctrl+L"), self, lambda: self.chat.composer.edit.setFocus())
         QShortcut(QKeySequence("Ctrl+M"), self, lambda: self.chat.composer.mic_btn.toggle())
+        QShortcut(QKeySequence("Ctrl+Shift+L"), self, lambda: self.start_live(None))
+        self.live_session = None
+        self.live_window = None
         self.refresh_all()
         for m in self.mascots.values():
             if m.prefs.visible:
@@ -201,6 +204,7 @@ class MainWindow(QMainWindow):
         c.speak.connect(lambda: self.voice.speak(self.chat.view.last_agent_text))
         c.mic.connect(lambda on: self.voice.ptt(on))
         c.devices.connect(self.devices_menu)
+        c.live.connect(lambda: self.start_live(None))
 
     def _sidebar(self) -> QWidget:
         side = QFrame()
@@ -665,13 +669,127 @@ class MainWindow(QMainWindow):
             run_bg(lambda a=a: self.engine.diagnose(a, cwd), lambda d: (self.refresh_status(),
                    self.diag.refresh() if self.stack.currentWidget() is self.diag else None))
 
+    # ------------------------------------------------------------------ live
+    def start_live(self, agent: str | None = None):
+        from ..voice import devices as dv, stt
+        if self.live_window is not None:
+            self.live_window.raise_()
+            self.live_window.activateWindow()
+            return
+        target = self.chat.composer.target
+        agent = agent or (target if target in ("codex", "claude") else "claude")
+        problems = []
+        st = stt.status(self.engine.home / "modelos", self.store.get_setting("voice.model", "small"))
+        if not st.ready:
+            problems.append("A transcrição local não está disponível nesta cópia (faltam: " + ", ".join(st.missing) + ").")
+        elif not st.model_cached and not self.store.get_setting("voice.model_consent", False):
+            problems.append("Autorize o download do modelo de transcrição em Configurações › Voz local.")
+        if not dv.available():
+            problems.append("O acesso a microfone/fone não está disponível nesta cópia.")
+        if problems:
+            QMessageBox.information(self, "Modo Live", "Para usar o Live:\n\n• " + "\n• ".join(problems))
+            self.go("settings")
+            return
+        if not self.voice.neural.ready:
+            self.toast("Dica: baixe as vozes neurais em Configurações › Voz para uma fala bem mais natural.")
+        from .live_window import LiveWindow
+        self.live_window = LiveWindow(self)
+        self.live_window.set_agent(agent)
+        self.live_window.show()
+        self.live_window.on_event({"type": "state", "state": "preparing"})
+        cwd = self.store.project(self.pid)["directory"] if self.pid is not None else str(self.engine.home)
+        win = self
+
+        def prepare():
+            exes = {}
+            for a in ("codex", "claude"):
+                try:
+                    exes[a] = win.engine.ensure_ready(a, cwd)
+                except Exception as exc:
+                    exes[a] = exc
+            model = win.store.get_setting("voice.model", "small")
+            if win.voice.transcriber is None or win.voice.transcriber.model_name != model:
+                win.voice.transcriber = stt.Transcriber(win.engine.home / "modelos", model)
+            win.voice.transcriber.load()
+            return exes
+        run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd),
+               lambda exc, tb: (self.live_window and self.live_window.on_event({"type": "error", "message": str(exc)})))
+
+    def _live_ready(self, exes: dict, agent: str, cwd: str):
+        from ..live.conversation import ClaudeConversation, CodexConversation
+        from ..live.session import LiveSession, NAMES_PROMPT
+        if self.live_window is None:
+            return
+        if isinstance(exes.get(agent), Exception):
+            other = "claude" if agent == "codex" else "codex"
+            if not isinstance(exes.get(other), Exception):
+                self.toast(f"{AGENT[agent]['name']} não está pronto; o Live começa com {AGENT[other]['name']}.")
+                agent = other
+            else:
+                self.live_window.on_event({"type": "error", "message": str(exes[agent])})
+                return
+        engine, store = self.engine, self.store
+
+        def make(a):
+            res = exes.get(a)
+            if isinstance(res, Exception):
+                raise res
+            exe, _caps = res
+            if a == "claude":
+                return ClaudeConversation(exe, cwd, model=store.get_setting("live.model_claude", "haiku"), env=engine.env,
+                                          on_rate_limit=engine._record_claude_limit)
+            return CodexConversation(exe, cwd, model=store.get_setting("live.model_codex", ""), env=engine.env)
+
+        def on_event(ev):
+            self.bridge.call.emit(lambda ev=ev: self.live_window and self.live_window.on_event(ev))
+
+        def on_task(text, a):
+            def add():
+                if self.pid is None:
+                    self.toast("Tarefa falada não registrada: vincule um projeto.")
+                    return
+                from ..messages import Intent
+                tid = self.engine.submit(self.pid, Intent("later", a, text))
+                self.toast(f"Tarefa #{tid} guardada na fila (DEPOIS): {text[:80]}")
+                self.refresh_status()
+            self.bridge.call.emit(add)
+        q = self.voice._ensure_queue()
+        self.live_session = LiveSession(
+            agent=agent, make_conversation=make,
+            transcribe=lambda audio: self.voice.transcriber.transcribe(audio, NAMES_PROMPT),
+            say=self.voice.say, stop_speech=self.voice.stop_speaking, speech_busy=lambda: bool(q and q.busy),
+            on_event=on_event, on_task=on_task, input_device=self.voice.input_index())
+        try:
+            self.live_session.start()
+        except Exception as exc:
+            self.live_window.on_event({"type": "error", "message": f"Não foi possível abrir o microfone: {exc}"})
+            self.live_session = None
+
+    def live_mute(self, on: bool):
+        if self.live_session:
+            self.live_session.set_muted(on)
+
+    def live_switch(self, agent: str):
+        if self.live_session:
+            self.live_session.set_agent(agent)
+
+    def stop_live(self):
+        s, self.live_session = self.live_session, None
+        self.live_window = None
+        if s:
+            run_bg(s.stop)
+        self.voice.stop_speaking()
+        for m in self.mascots.values():
+            if m.state in ("listening", "speaking", "thinking"):
+                m.set_state("idle")
+
     # ------------------------------------------------------------------ audio devices
     def check_audio_devices(self, force: bool = False):
         """Detect plugged/unplugged microphones and headsets (never while recording or speaking)."""
         from ..voice import devices as dv
         if getattr(self, "_audio_busy", False) or not dv.available():
             return
-        if not force and hasattr(self, "voice") and self.voice.busy:
+        if not force and ((hasattr(self, "voice") and self.voice.busy) or getattr(self, "live_session", None)):
             return
         self._audio_busy = True
 
@@ -1021,6 +1139,8 @@ class MainWindow(QMainWindow):
             return
         for p in busy:
             self.engine.cancel(p["id"])
+        if self.live_window is not None:
+            self.live_window.close()
         self.voice.shutdown()
         for m in self.mascots.values():
             if m.window:

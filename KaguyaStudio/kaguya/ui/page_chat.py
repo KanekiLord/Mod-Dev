@@ -174,6 +174,7 @@ class Composer(Card):
     speak = Signal()
     mic = Signal(bool)
     devices = Signal()
+    live = Signal()
 
     def __init__(self):
         super().__init__(padding=12, radius=16, accent=C["gold"])
@@ -207,6 +208,12 @@ class Composer(Card):
         self.speak_btn.clicked.connect(self.speak.emit)
         self.dev_btn = button("", "settings", "ghost", "Escolher microfone e fone")
         self.dev_btn.clicked.connect(self.devices.emit)
+        self.live_btn = button("Live", "wave", tip="Conversa por voz contínua com a IA escolhida (Ctrl+Shift+L)")
+        self.live_btn.setStyleSheet(f"QPushButton {{ background: {C['violet_bg']}; border: 1px solid {C['violet']}; "
+                                    f"color: {C['text']}; }} QPushButton:hover {{ background: {C['hover']}; }}")
+        self.live_btn.setIcon(theme.icon("wave", C["violet"]))
+        self.live_btn.clicked.connect(self.live.emit)
+        row.addWidget(self.live_btn)
         row.addWidget(self.mic_btn)
         row.addWidget(self.dev_btn)
         row.addWidget(self.speak_btn)

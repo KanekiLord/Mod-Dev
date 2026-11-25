@@ -12,6 +12,21 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
 | `test_ui_v4.py` (8) | Diálogo de vínculo (colar caminho com aspas, vault próprio, salvar); tarefa de Equipe pela UI atualizando conversa, pipeline e mascotes; DEPOIS não inicia trabalho; todas as páginas sem projeto; modos responsivos; recorte de sprite sem alterar o PNG. | Qt offscreen |
 | `test_cli_reais.py` (5) | **CLIs oficiais reais**: descoberta, versão, flags, estado de login, execução headless real e consulta de limites do Codex. Só com `KAGUYA_TEST_REAL_CLIS=1`; execução com conta logada só com `KAGUYA_TEST_REAL_RUN=1`. | Binários reais |
 
+## Modo Live e vozes (4.3.0–4.4.0)
+
+- `test_live.py`: VAD (início/fim de fala, ruído adaptativo, barge-in), comandos falados, marcador de tarefa
+  nunca falado e convertido em tarefa DEPOIS, interrupção do turno, conversa persistente com o Claude
+  simulado em stream-json (vários turnos num só processo).
+- `test_ui_v4.py › LiveUi`: janela Live com turno completo pela conversa simulada do Claude (legenda do usuário,
+  resposta, fala pela IA certa), troca para o Codex indisponível mostrando o erro, encerrar limpa a sessão;
+  sem transcrição local o Live explica o que falta em vez de abrir.
+- `test_speech.py`: divisão em frases (primeira curta), fila de fala que sintetiza à frente e para na hora.
+- **Real (Linux)**: Claude Code 2.1.331 em `--input-format stream-json` atendeu vários turnos num processo,
+  manteve contexto, enviou `rate_limit_event` e aceitou a interrupção `control_request`. Kokoro int8
+  sintetizou pt-BR (pf_dora) localmente. `codex app-server` → `thread/realtime/start` respondeu
+  "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
+- **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
+
 ## Verificado com binários reais (ambiente Linux de desenvolvimento)
 
 - `codex-cli 0.172.0` sem login: diagnóstico "Não autenticado"; `exec` fora do Git agora chega à API e
@@ -54,5 +69,6 @@ capturas 100–200% com renderização do Windows, build PyInstaller e teste de 
 
 - Login e tarefas reais com **suas** assinaturas Codex e Claude; leitura de limites com sua conta Codex.
 - Seu vault real e o formato real do seu `tasks/todo.md`; seus 72 agentes nos diretórios reais.
-- Microfone, transcrição faster-whisper (modelo não baixado aqui) e vozes SAPI instaladas no seu Windows.
+- Microfone/fone reais, eco sem fone no Live, transcrição faster-whisper com sua voz, vozes SAPI do seu Windows
+  e a velocidade do Kokoro no seu processador.
 - Minecraft/Gradle de projetos reais (o Studio executa os testes do projeto só com sua autorização).
