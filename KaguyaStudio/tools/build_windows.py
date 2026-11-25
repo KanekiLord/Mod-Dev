@@ -24,7 +24,7 @@ def voice_args() -> list[str]:
     import importlib.util
     args = []
     for mod in ("faster_whisper", "ctranslate2", "sounddevice", "_sounddevice_data", "av", "tokenizers",
-                "onnxruntime", "huggingface_hub"):
+                "onnxruntime", "huggingface_hub", "kokoro_onnx", "espeakng_loader", "phonemizer"):
         if importlib.util.find_spec(mod) is not None:
             args += ["--collect-all", mod]
     if args:

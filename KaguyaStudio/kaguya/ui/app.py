@@ -164,7 +164,7 @@ def _check_voice(dg) -> int:
     st = stt.status(data_dir() / "modelos")
     lines.append(f"faltando={st.missing}")
     ok = st.ready
-    for mod in ("numpy", "faster_whisper", "ctranslate2", "sounddevice"):
+    for mod in ("numpy", "faster_whisper", "ctranslate2", "sounddevice", "kokoro_onnx", "espeakng_loader"):
         try:
             __import__(mod)
             lines.append(f"{mod}: ok")

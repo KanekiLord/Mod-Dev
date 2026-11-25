@@ -19,6 +19,9 @@ class VoiceController(QObject):
         self.recorder: stt.Recorder | None = None
         self.transcriber: stt.Transcriber | None = None
         self._speaking_agent = None
+        from ..voice.neural import NeuralVoices
+        self.neural = NeuralVoices(self.win.engine.home / "modelos")
+        self.queue = None   # SpeechQueue, created lazily (needs numpy/sounddevice)
 
     # ------------------------------------------------------------------ devices
     def input_index(self):
@@ -33,25 +36,80 @@ class VoiceController(QObject):
 
     @property
     def busy(self) -> bool:
-        return self.recorder is not None or self.speaker.speaking
+        return self.recorder is not None or self.speaker.speaking or bool(self.queue and self.queue.busy)
 
     # ------------------------------------------------------------------ TTS
+    def engine_name(self) -> str:
+        """'neural' (Kokoro) when installed and chosen, otherwise 'windows'."""
+        choice = self.win.store.get_setting("voice.engine", "auto")
+        if choice in ("auto", "neural") and self.neural.ready:
+            return "neural"
+        return "windows"
+
+    def voice_for(self, agent: str) -> str:
+        from ..voice.neural import DEFAULT_PRESET
+        st = self.win.store
+        if self.engine_name() == "neural":
+            return st.get_setting(f"voice.neural_{agent}", DEFAULT_PRESET.get(agent, "dora"))
+        return st.get_setting(f"voice.voice_{agent}", "") or st.get_setting("voice.tts_voice", "") or ""
+
+    def _ensure_queue(self):
+        from ..voice import devices as dv
+        from ..voice.speech import SpeechQueue, sapi_synth, sounddevice_player
+        if self.queue is not None or not dv.available():
+            return self.queue
+
+        def synth(text, agent):
+            if self.engine_name() == "neural":
+                return self.neural.synth(text, self.voice_for(agent))
+            return sapi_synth(self.voice_for)(text, agent)
+
+        def on_state(state, agent):
+            self.win.bridge.call.emit(lambda: self._on_queue_state(state, agent))
+        self.queue = SpeechQueue(synth, sounddevice_player(self.output_index), on_state)
+        return self.queue
+
+    def _on_queue_state(self, state: str, agent: str):
+        m = self.win.mascots.get(agent)
+        if state == "speaking":
+            self.win.chat.composer.speak_btn.setText("Parar voz")
+            if m:
+                m.set_state("speaking")
+        else:
+            self.win.chat.composer.speak_btn.setText("Ouvir")
+            if m and m.state == "speaking":
+                m.set_state("idle")
+
+    def say(self, text: str, agent: str) -> bool:
+        """Queue speech (used by Live and auto-read). Returns False when no voice output exists."""
+        q = self._ensure_queue()
+        if q is None:
+            return False
+        q.say(text, agent)
+        return True
+
+    def stop_speaking(self):
+        if self.queue:
+            self.queue.stop()
+        self.speaker.stop()
+
     def speak(self, text: str, agent: str | None = None):
         if not text:
             self.win.toast("Ainda não há resposta para ouvir.")
             return
-        if self.speaker.speaking:
-            self.speaker.stop()
+        if self.busy and (self.speaker.speaking or (self.queue and self.queue.busy)):
+            self.stop_speaking()
             self._done_speaking()
             return
+        self._speaking_agent = agent or self._last_agent()
+        if self.say(text, self._speaking_agent):
+            return
+        # Fallback without numpy/sounddevice: direct Windows voice.
         if Speaker.backend() is None:
             self.win.toast("Leitura por voz indisponível neste sistema.")
             return
-        self._speaking_agent = agent or self._last_agent()
-        st = self.win.store
-        self.speaker.voice = (st.get_setting(f"voice.voice_{self._speaking_agent}", "") or st.get_setting("voice.tts_voice", "")
-                              or "")
-        self.speaker.output_device = self.output_index()
+        self.speaker.voice = self.voice_for(self._speaking_agent) if self.engine_name() == "windows" else ""
+        self.speaker.output_device = None
         m = self.win.mascots.get(self._speaking_agent)
         if m:
             m.set_state("speaking")
@@ -158,7 +216,7 @@ class VoiceController(QObject):
         return f"Tarefa {tid} em andamento, etapa {stage}. {pend - 1 if pend else 0} outras na fila."
 
     def shutdown(self):
-        self.speaker.stop()
+        self.stop_speaking()
         if self.recorder:
             try:
                 self.recorder.stop()

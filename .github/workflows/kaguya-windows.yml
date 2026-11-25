@@ -31,10 +31,14 @@ jobs:
       - name: CLIs oficiais (instaladas sem login, sem chaves)
         run: npm install -g @openai/codex @anthropic-ai/claude-code
 
+      - name: Vozes neurais (download real pelo próprio Studio, com SHA-256)
+        run: python -c "from pathlib import Path; from kaguya.voice.neural import NeuralVoices; v=NeuralVoices(Path('ci-modelos')); v.download(); print('instaladas:', v.installed())"
+
       - name: Testes automatizados (inclui CLIs reais sem conta)
         env:
           QT_QPA_PLATFORM: offscreen
           KAGUYA_TEST_REAL_CLIS: "1"
+          KAGUYA_TEST_KOKORO_DIR: ci-modelos
           PYTHONIOENCODING: utf-8
         run: python -m unittest discover -s tests -t . -v
 

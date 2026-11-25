@@ -506,9 +506,45 @@ class SettingsPage(QWidget):
         vc.lay.addWidget(label("VOZ LOCAL (SEM API PAGA)", "section"))
         self.voice_info = label("", "muted", wrap=True)
         vc.lay.addWidget(self.voice_info)
+        from ..voice.neural import DEFAULT_PRESET, PRESETS
+        nrow = QHBoxLayout()
+        self.neural_info = label("", "muted", wrap=True)
+        self.neural_btn = button("Baixar vozes neurais (~120 MB)", "download", "primary")
+        self.neural_btn.clicked.connect(self.download_neural)
+        from PySide6.QtWidgets import QProgressBar
+        self.neural_progress = QProgressBar()
+        self.neural_progress.setFixedHeight(8)
+        self.neural_progress.hide()
+        nrow.addWidget(self.neural_info, 1)
+        nrow.addWidget(self.neural_btn)
+        vc.lay.addLayout(nrow)
+        vc.lay.addWidget(self.neural_progress)
         vform = QFormLayout()
+        self.engine_combo = QComboBox()
+        for key, text in (("auto", "Automático (neural se instalada)"), ("neural", "Vozes neurais (Kokoro)"),
+                          ("windows", "Vozes do Windows")):
+            self.engine_combo.addItem(text, key)
+            if key == win.store.get_setting("voice.engine", "auto"):
+                self.engine_combo.setCurrentIndex(self.engine_combo.count() - 1)
+        self.engine_combo.currentIndexChanged.connect(lambda: win.store.set_setting("voice.engine", self.engine_combo.currentData()))
+        vform.addRow("Motor de voz", self.engine_combo)
+        self.neural_combos = {}
+        for agent, title in (("codex", "Voz neural da Kaguya"), ("claude", "Voz neural da Claude")):
+            box = QHBoxLayout()
+            cb = QComboBox()
+            for pid, preset in PRESETS.items():
+                cb.addItem(preset.label, pid)
+                if pid == win.store.get_setting(f"voice.neural_{agent}", DEFAULT_PRESET[agent]):
+                    cb.setCurrentIndex(cb.count() - 1)
+            cb.currentIndexChanged.connect(lambda _=0, a=agent, c=cb: win.store.set_setting(f"voice.neural_{a}", c.currentData()))
+            prev = button("Ouvir amostra", "play", "ghost")
+            prev.clicked.connect(lambda _=False, a=agent: self.preview_voice(a))
+            box.addWidget(cb, 1)
+            box.addWidget(prev)
+            self.neural_combos[agent] = cb
+            vform.addRow(title, box)
         self.voice_combos = {}
-        for agent, title in (("codex", "Voz da Kaguya (Codex)"), ("claude", "Voz da Claude")):
+        for agent, title in (("codex", "Voz do Windows da Kaguya"), ("claude", "Voz do Windows da Claude")):
             cb = QComboBox()
             cb.addItem("Automática (pt-BR se instalada)", "")
             cb.currentIndexChanged.connect(lambda _=0, a=agent, c=cb: win.store.set_setting(f"voice.voice_{a}", c.currentData()))
@@ -603,6 +639,7 @@ class SettingsPage(QWidget):
             parts.append(f"Transcrição: faltam {', '.join(st.missing)}. Instale com o botão no INSTALAR.bat (opção voz) ou: "
                          f"{stt.INSTALL_CMD}")
         self.voice_info.setText(" ".join(parts))
+        self.refresh_neural()
         if not self._voices_loaded and os.name == "nt":
             self._voices_loaded = True
             run_bg(Speaker().voices, self._fill_voices)
@@ -614,6 +651,50 @@ class SettingsPage(QWidget):
                 cb.addItem(f"{name} ({culture})", name)
                 if name == cur:
                     cb.setCurrentIndex(cb.count() - 1)
+
+    def refresh_neural(self):
+        from ..voice import neural
+        v = self.win.voice.neural
+        if not neural.package_available():
+            self.neural_info.setText("Vozes neurais: o motor não está incluído nesta cópia (atualize o Studio).")
+            self.neural_btn.hide()
+        elif v.installed():
+            self.neural_info.setText("Vozes neurais instaladas: fala natural em pt-BR, local e gratuita.")
+            self.neural_btn.hide()
+        else:
+            self.neural_info.setText("Vozes neurais (Kokoro): fala natural em pt-BR, roda no seu PC sem custo. "
+                                     "Download único de ~120 MB (só após você clicar).")
+            self.neural_btn.show()
+
+    def download_neural(self):
+        v = self.win.voice.neural
+        self.neural_btn.setEnabled(False)
+        self.neural_progress.show()
+        self.neural_progress.setValue(0)
+
+        def prog(done, total):
+            self.win.bridge.call.emit(lambda: (self.neural_progress.setMaximum(total), self.neural_progress.setValue(done)))
+
+        def done(_):
+            self.neural_btn.setEnabled(True)
+            self.neural_progress.hide()
+            self.refresh_neural()
+            self.win.toast("Vozes neurais instaladas. Use 'Ouvir amostra' para escolher a voz de cada IA.")
+
+        def fail(exc, tb):
+            self.neural_btn.setEnabled(True)
+            self.neural_progress.hide()
+            QMessageBox.warning(self, "Vozes neurais", f"Não foi possível baixar: {exc}")
+        run_bg(lambda: v.download(prog), done, fail)
+
+    def preview_voice(self, agent: str):
+        if not self.win.voice.neural.ready:
+            self.win.toast("Baixe as vozes neurais primeiro.")
+            return
+        name = "Kaguya" if agent == "codex" else "Claude"
+        self.win.voice.stop_speaking()
+        if not self.win.voice.say(f"Oi! Eu sou a {name}. Esta é a minha voz no Kaguya Studio.", agent):
+            self.win.toast("Saída de áudio indisponível nesta cópia.")
 
     def fill_devices(self, ins, outs):
         self._filling = True

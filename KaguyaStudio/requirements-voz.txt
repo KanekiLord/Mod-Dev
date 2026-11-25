@@ -3,3 +3,5 @@
 faster-whisper>=1.0
 sounddevice>=0.4
 numpy>=1.24
+# Vozes neurais locais (Kokoro, Apache-2.0); o modelo (~120 MB) é baixado só com sua autorização
+kokoro-onnx>=0.4
