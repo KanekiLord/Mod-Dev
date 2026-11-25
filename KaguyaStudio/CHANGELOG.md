@@ -1,5 +1,31 @@
 # Changelog
 
+## 5.8.0 — 25/11/2026 (Kaguya Extension Hub)
+
+Relatório completo, decisões, evidências reais, limitações e rollback: `docs/EXTENSION_HUB.md`.
+
+### Novo — página **Extensões**
+- **Descoberta automática (só leitura)** dos MCPs, plugins (com seus componentes), skills, agentes (mantendo a
+  hierarquia de pastas), comandos e hooks do **Claude Code** (Miwa) e do **Codex** (Kaguya): usuário, projeto, local,
+  plugin e builtin, por projeto. Usa os arquivos oficiais e as listagens oficiais (`claude plugin list --json`,
+  `codex mcp list --json`, `codex plugin list --json`). Nada é alterado nem executado na varredura.
+- **Estados reais e independentes**: descoberto → configurado → habilitado → carregado na sessão → conectado →
+  capacidade verificada, mais `requer login/aprovação/reinício`, `falha`, `desabilitado`, `só na web`, `removido` —
+  sempre com evidência, versão, escopo e data da última verificação. Configuração em disco nunca é mostrada como
+  "disponível".
+- **Sincronização automática** em segundo plano (com espera para arquivos sendo gravados): novas instalações,
+  remoções, mudanças de versão e de configuração aparecem sozinhas, com aviso; histórico guardado.
+- **Testar conexão** pelo teste oficial (`claude mcp get`) ou por handshake MCP que só **lista** as ferramentas
+  (nada é executado); as **sessões reais** do Claude Code que o Studio abre registram o que conectou de verdade.
+- **Delegação**: cada IA sabe o que ela e a outra têm; pedido de Blockbench para a Kaguya quando só a Miwa tem é
+  oferecido à Miwa (com o MCP dela liberado naquela tarefa); uma IA pode pedir à outra com `[[DELEGAR:…]]` e o Studio
+  cria a tarefa. Nada é copiado entre os clientes.
+- **Instalação/ativação/remoção supervisionadas**: plano com o comando oficial (segredos ocultos), revisão de origem,
+  permissões, custos (ex.: ElevenLabs), segredos e scripts que baixam código (npx/uvx), conflitos de nome e porta,
+  como desfazer — e só roda depois de você marcar "revisei" e aprovar. Segredos vão só para o cliente oficial.
+- **Blender/Blockbench**: um escritor por arquivo/aplicativo de cada vez e backup do `.blend`/`.bbmodel` antes.
+- **Plugins só da web** (ChatGPT/Claude web) podem ser registrados e aparecem como não transferíveis.
+
 ## 5.7.0 — 25/11/2026 (Etapa D: Leitor Universal + motor de conhecimento)
 
 ### Novo — Leitor Universal (botão **Anexar** na Conversa)

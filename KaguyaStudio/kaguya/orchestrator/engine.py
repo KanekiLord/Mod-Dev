@@ -43,6 +43,7 @@ DEFAULTS = {
     "economy.max_subagents": 2,
     "desktop.window": "Minecraft",   # computer use limited to this window by default ("" = whole screen)
     "desktop.max_actions": 400,
+    "hub.enabled": True,             # Extension Hub: capability list in prompts, real-session evidence, delegation, locks
     "team.max_cycles": 2,
     "team.implementer": "codex",
     "team.reviewer": "claude",
@@ -79,6 +80,8 @@ class Engine:
         from ..browser.mcp import server_command as browser_server_command
         self.browser_command = browser_server_command()
         # set by the UI: (agent, task_id) -> {"port", "token"} or None, and the matching release(token)
+        self._hub = None
+        self.locks = None
         self.browser_bridge = None
         self.browser_release = None
         self._browser_tokens: dict[int, str] = {}
@@ -153,6 +156,31 @@ class Engine:
                 idx = VaultIndex(Path(vault), self.home)
                 self._indexes[vault] = idx
         return idx
+
+    @property
+    def hub(self):
+        """Extension Hub (catalogue of what Codex/Claude Code really have). Created on first use."""
+        if self._hub is None:
+            from ..hub.router import ResourceLocks
+            from ..hub.service import HubService
+
+            import shutil as _sh
+            from ..hub.adapters import ClaudeAdapter, CodexAdapter
+
+            def exes():
+                """The same CLIs the Studio runs (official on the PC; test doubles in tests)."""
+                path = (self.env or os.environ).get("PATH")
+                out = {a: self.store.get_setting(f"cli.{a}.path") or _sh.which(a, path=path) for a in ("codex", "claude")}
+                return {k: v for k, v in out.items() if v}
+            base = os.environ.get("KAGUYA_HUB_HOME")      # tests: an isolated "user folder" for the clients' configs
+            home = Path(base) if base else None
+            found = exes()
+            adapters = {"claude": ClaudeAdapter(home, exe=found.get("claude")),
+                        "codex": CodexAdapter(home, exe=found.get("codex"))}
+            self._hub = HubService(self.home, projects=lambda: [p["directory"] for p in self.store.projects()
+                                                                 if not p.get("removed")], exes=exes, adapters=adapters)
+            self.locks = ResourceLocks()
+        return self._hub
 
     def outbox(self, pid: int) -> Outbox:
         """Review queue. Without a connected vault it still queues proposals (approved once the vault is linked)."""
@@ -255,7 +283,9 @@ class Engine:
             rt.task_id = task["id"]
             self.emit("task_started", pid=pid, task_id=task["id"], target=task["target"], title=task["title"])
             status, summary = "error", ""
+            held = False
             try:
+                held = self._take_resources(pid, task, rt.cancel)
                 if task.get("autonomous") and task["allow_write"] and task["target"] != "paralelo":
                     self._restore_point(pid, task)
                 if task.get("desktop"):
@@ -275,6 +305,10 @@ class Engine:
                 self.store.append_event(task["id"], "error", summary + "\n" + traceback.format_exc()[-3000:])
             if task.get("desktop"):
                 self._finish_desktop(pid, task["id"])
+            if held and self.locks is not None:
+                self.locks.release(f"tarefa #{task['id']}")
+            if status in ("executed", "approved", "pending_review"):
+                self._delegate(pid, task, summary)
             tok = self._browser_tokens.pop(task["id"], None)
             if tok and self.browser_release:
                 self.browser_release(tok)   # the assistant loses browser access the moment the task ends
@@ -295,6 +329,61 @@ class Engine:
         if self.store.is_pc(pid):
             return ""  # personal-assistant tasks use the whole screen (other apps, WhatsApp, calendar…)
         return str(self.setting("desktop.window") or "").strip()
+
+    def _take_resources(self, pid: int, task: dict, cancel: threading.Event) -> bool:
+        """One writer per 3D file/app (Blender, Blockbench): wait for the other task, back up the files first."""
+        if not self.setting("hub.enabled"):
+            return False
+        from ..hub.router import backup, resources_for
+        proj = self.store.project(pid)
+        keys, files = resources_for(f"{task['title']}\n{task.get('context') or ''}", proj["directory"], self.hub.registry)
+        if not keys:
+            return False
+        owner = f"tarefa #{task['id']}"
+        waited = False
+        while not cancel.is_set():
+            busy = self.locks.acquire(keys, owner)
+            if busy is None:
+                break
+            if not waited:
+                self.store.append_event(task["id"], "system", f"Aguardando recurso em uso: {busy}")
+                self.store.set_stage(task["id"], "aguardando recurso")
+                waited = True
+            cancel.wait(2)
+        if cancel.is_set():
+            raise TaskFailed("Interrompido enquanto esperava o recurso.", "cancelled")
+        if files:
+            saved = backup(files, self.home / "backups" / "3d")
+            self.store.append_event(task["id"], "system", "Backup antes de mexer nos arquivos 3D: "
+                                    + ", ".join(str(p) for p in saved))
+        return True
+
+    def _delegate(self, pid: int, task: dict, text: str) -> None:
+        """[[DELEGAR:kaguya|miwa: pedido]] in an answer → a task for the other assistant (with its MCPs allowed)."""
+        if not self.setting("hub.enabled") or task.get("target") not in ("codex", "claude"):
+            return
+        from ..hub.router import AGENTS, delegations
+        from ..messages import Intent
+        for target, request in delegations(text)[:3]:
+            if target == task["target"]:
+                continue
+            if task["title"].startswith("[Pedido da"):
+                self.store.append_event(task["id"], "warning", "Delegação em cadeia bloqueada (pedido já veio da outra IA).")
+                continue
+            who = AGENTS[task["target"]]
+            title = f"[Pedido da {who}] {request}\n\n(Tarefa original #{task['id']}: {task['title'][:300]})"
+            new = self.submit(pid, Intent("execute", target, title), write=False, web=True, commands=False, mcp=True)
+            self.store.append_event(task["id"], "system", f"{who} pediu à {AGENTS[target]}: {request[:200]} (tarefa #{new})")
+            self.emit("delegated", pid=pid, task_id=task["id"], new_task=new, target=target)
+
+    def _hub_context(self, task: dict) -> str:
+        if not self.setting("hub.enabled") or task.get("target") not in ("codex", "claude"):
+            return ""
+        try:
+            from ..hub.router import context
+            return context(self.hub.registry, task["target"])
+        except Exception:
+            return ""
 
     @staticmethod
     def _images(task: dict) -> list[str]:
@@ -444,6 +533,11 @@ class Engine:
                     self.store.append_event(tid, ev.kind, ev.text, agent)
             if ev.kind == "rate_limit":
                 self._record_claude_limit(ev.data)
+            if agent == "claude" and isinstance(ev.data, dict) and "mcp_servers" in ev.data and self.setting("hub.enabled"):
+                try:   # the real session says what loaded and connected: strongest evidence for the Hub
+                    self.hub.registry.record_session("claude", ev.data, project=str(cwd))
+                except Exception:
+                    pass
             self.emit("agent_event", pid=pid, task_id=tid, agent=agent, kind=ev.kind, text=ev.text, data=ev.data,
                       stage=stage)
 
@@ -506,7 +600,8 @@ class Engine:
             except Exception:
                 agents = []
         return {"project": f"{proj['name']} ({proj['directory']})", "memory": self.memory_for(pid, task["title"]),
-                "extra": attached_context(task.get("context") or "", self._images(task)),
+                "extra": "\n\n".join(x for x in (attached_context(task.get("context") or "", self._images(task)),
+                                                   self._hub_context(task)) if x),
                 "autonomous": bool(task.get("autonomous")),
                 "desktop": self._desktop_window(pid) if task.get("desktop") else None,
                 "pc": self.store.is_pc(pid), "browser": bool(task.get("browser")),

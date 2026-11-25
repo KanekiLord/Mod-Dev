@@ -67,6 +67,97 @@ Commands: resume
   -i, --image <FILE>...
 """
 
+
+def _hub_home():
+    return Path(os.environ.get("FAKE_HOME") or Path.home())
+
+
+def _jload(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+if name == "claude" and args[:1] in (["mcp"], ["plugin"]):
+    home = _hub_home()
+    cfg_path = home / ".claude.json"
+    if args[:3] == ["plugin", "list", "--json"]:
+        print(os.environ.get("FAKE_CLAUDE_PLUGINS", "[]")); sys.exit(0)
+    if args[:2] == ["plugin", "details"]:
+        print(f"{args[2]}\n  Source: {args[2]}\n\nComponent inventory\n  Skills (1)  revisar-modelo\n  Agents (0)\n"
+              "  Hooks (0)\n  MCP servers (0)\n  LSP servers (0)\n"); sys.exit(0)
+    if args[:2] in (["plugin", "enable"], ["plugin", "disable"], ["plugin", "uninstall"], ["plugin", "install"]):
+        print(f"{args[1]} ok: {args[2]}"); sys.exit(0)
+    if args[:2] == ["mcp", "get"]:
+        status = json.loads(os.environ.get("FAKE_MCP_STATUS", "{}")).get(args[2], "connected")
+        text = {"connected": "√ Connected", "failed": "× Failed to connect", "needs-auth": "△ Needs authentication",
+                "pending": "⏸ Pending approval"}[status]
+        print(f"{args[2]}:\n  Scope: User config\n  Status: {text}\n  Type: stdio\n  Environment:\n    API_KEY=valor-secreto-do-fake")
+        sys.exit(0)
+    if args[:2] == ["mcp", "add-json"]:
+        nm, raw = args[2], args[3]
+        scope = args[args.index("-s") + 1] if "-s" in args else "local"
+        spec = json.loads(sys.stdin.read() if raw == "-" else raw)
+        if scope == "project":
+            pj = Path.cwd() / ".mcp.json"
+            data = _jload(pj); data.setdefault("mcpServers", {})[nm] = spec
+            pj.write_text(json.dumps(data), encoding="utf-8")
+        else:
+            data = _jload(cfg_path)
+            target = data if scope == "user" else data.setdefault("projects", {}).setdefault(str(Path.cwd()), {})
+            target.setdefault("mcpServers", {})[nm] = spec
+            cfg_path.write_text(json.dumps(data), encoding="utf-8")
+        print(f"Added MCP server {nm} to {scope} config"); sys.exit(0)
+    if args[:2] == ["mcp", "remove"]:
+        nm = args[2]
+        data = _jload(cfg_path)
+        data.get("mcpServers", {}).pop(nm, None)
+        for proj in data.get("projects", {}).values():
+            proj.get("mcpServers", {}).pop(nm, None)
+        cfg_path.write_text(json.dumps(data), encoding="utf-8")
+        pj = Path.cwd() / ".mcp.json"
+        if pj.is_file():
+            d2 = _jload(pj); d2.get("mcpServers", {}).pop(nm, None); pj.write_text(json.dumps(d2), encoding="utf-8")
+        print(f"Removed MCP server {nm}"); sys.exit(0)
+
+if name == "codex" and args[:1] in (["mcp"], ["plugin"]):
+    home = _hub_home()
+    toml_path = home / ".codex" / "config.toml"
+    if args[:3] == ["plugin", "list", "--json"]:
+        print(json.dumps({"installed": json.loads(os.environ.get("FAKE_CODEX_PLUGINS", "[]")), "available": []}))
+        sys.exit(0)
+    if args[:3] == ["mcp", "list", "--json"]:
+        import tomllib
+        cfg = tomllib.loads(toml_path.read_text(encoding="utf-8")) if toml_path.is_file() else {}
+        auth = json.loads(os.environ.get("FAKE_CODEX_AUTH_STATUS", "{}"))
+        print(json.dumps([{"name": n, "enabled": v.get("enabled", True), "disabled_reason": None,
+                           "transport": {"type": "stdio", "command": v.get("command"), "env": v.get("env", {})},
+                           "auth_status": auth.get(n, "unsupported")} for n, v in cfg.get("mcp_servers", {}).items()]))
+        sys.exit(0)
+    if args[:2] == ["mcp", "add"]:
+        nm = args[2]
+        env, rest = {}, args[3:]
+        while rest and rest[0] == "--env":
+            k, v = rest[1].split("=", 1); env[k] = v; rest = rest[2:]
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = [f"\n[mcp_servers.{nm}]", f"command = {json.dumps(rest[0])}", f"args = {json.dumps(rest[1:])}"]
+        if env:
+            lines.append(f"[mcp_servers.{nm}.env]")
+            lines += [f"{k} = {json.dumps(v)}" for k, v in env.items()]
+        with open(toml_path, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        print(f"Added global MCP server '{nm}'."); sys.exit(0)
+    if args[:2] == ["mcp", "remove"]:
+        import re as _re
+        nm = args[2]
+        text = toml_path.read_text(encoding="utf-8") if toml_path.is_file() else ""
+        text = _re.sub(rf"\n?\[mcp_servers\.{_re.escape(nm)}(\.env)?\][^\[]*", "", text)
+        toml_path.write_text(text, encoding="utf-8")
+        print(f"Removed global MCP server '{nm}'."); sys.exit(0)
+
 if name == "claude":
     if args[:1] == ["--version"]:
         print("2.1.0 (Claude Code)"); sys.exit(0)
@@ -151,6 +242,8 @@ if name == "claude":
                     ([] if verdict == "aprovado" else ["Falta tratar entrada vazia em Missao.java"])}) + "\n```")
         else:
             text = "Resposta do Claude: " + prompt.strip().splitlines()[-1][:120]
+            if os.environ.get("FAKE_CLAUDE_REPLY") and "[Pedido da" not in prompt:
+                text = os.environ["FAKE_CLAUDE_REPLY"]
             text += "\nAPRENDIZADOS:\n- Forge 1.7.10 exige registrar eventos no FMLInitializationEvent."
         out({"type": "assistant", "session_id": sid, "message": {"content": [{"type": "text", "text": text}]}})
         out({"type": "rate_limit_event", "session_id": sid,

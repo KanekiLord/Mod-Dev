@@ -30,7 +30,7 @@ from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
 NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("browser", "globe", "Navegador"), ("webchats", "link", "ChatGPT e Claude"), ("music", "music", "Kaguya Music"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
-       ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("voices", "volume", "Vozes"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
+       ("agents", "agents", "Agentes e skills"), ("hub", "layers", "Extensões"), ("persona", "sparkle", "Personalidades"), ("voices", "volume", "Vozes"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
 
@@ -159,6 +159,13 @@ class MainWindow(QMainWindow):
         self._later(2500, lambda: run_bg(self.refresh_github_status))
         if self.store.get_setting("wake.enabled", False) and self.store.get_setting("wake.consent", False):
             self._later(4000, lambda: self.set_wake(True))  # the user left the name listener on
+        # Extension Hub: watch the clients' configs (debounced, read-only) and tell when something new appears
+        self._hub_timer = QTimer(self, interval=6000)
+        self._hub_timer.timeout.connect(self._hub_poll)
+        self._hub_busy = False
+        if not self.demo and self.engine.setting("hub.enabled"):
+            self._hub_timer.start()
+            self._later(4000, lambda: self._hub_poll(initial=True))
         self._observe_timer = QTimer(self, interval=1000)
         self._observe_timer.timeout.connect(self.refresh_observation)
         self._observe_timer.start()
@@ -245,7 +252,9 @@ class MainWindow(QMainWindow):
         self.music_page = MusicPage(self)
         from .page_voices import VoicesPage
         self.voices_page = VoicesPage(self)
-        self.pages = {"home": self.home, "chat": self.chat, "browser": self.browser, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page, "voices": self.voices_page,
+        from .page_hub import HubPage
+        self.hub_page = HubPage(self)
+        self.pages = {"home": self.home, "chat": self.chat, "browser": self.browser, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "hub": self.hub_page, "persona": self.persona_page, "voices": self.voices_page,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)
@@ -818,6 +827,7 @@ class MainWindow(QMainWindow):
             perms["web"] = True
         if intent.target == "paralelo":
             perms["write"] = True
+        self.route_capability(intent, perms)
         auto = bool(perms.get("autonomous")) and intent.kind == "execute"
         if self.store.is_pc(self.pid):
             # personal-assistant tasks: one assistant (no review loop), permissions decided by the engine
@@ -922,6 +932,52 @@ class MainWindow(QMainWindow):
         self.toast("Tudo pausado" + (f": {', '.join(stopped)}." if stopped else " (nada estava rodando).")
                    + " Tarefas interrompidas podem ser reenfileiradas na Fila.", 7000)
         return stopped
+
+    def _hub_poll(self, initial: bool = False):
+        if self._hub_busy or getattr(self, "_detached", False):
+            return
+        self._hub_busy = True
+        hub = self.engine.hub
+
+        def done(events):
+            self._hub_busy = False
+            if getattr(self, "_detached", False):
+                return
+            news = [e for e in events if e["event"] in ("descoberto", "reinstalado", "removido", "alterado")]
+            if news and not initial:
+                important = [e for e in news if ":mcp:" in e["id"] or ":plugin:" in e["id"]]
+                pick = important or news
+                verb = {"descoberto": "nova", "reinstalado": "voltou", "removido": "removida", "alterado": "atualizada"}
+                text = "; ".join(f"{verb[e['event']]}: {e['name']}" for e in pick[:3])
+                self.toast(f"Extensões: {text}" + (f" (+{len(news) - 3})" if len(news) > 3 else ""), 6000)
+            if events and self.stack.currentWidget() is self.hub_page:
+                self.hub_page.refresh_table()
+
+        def fail(_exc, _tb):
+            self._hub_busy = False
+        run_bg(hub.scan if initial else hub.poll, done, fail)
+
+    def ask_yes_no(self, title: str, text: str) -> bool:
+        return QMessageBox.question(self, title, text) == QMessageBox.Yes
+
+    def route_capability(self, intent, perms: dict) -> None:
+        """A request that needs a tool goes to the assistant that really has it (Extension Hub)."""
+        if intent.kind != "execute" or intent.target not in ("codex", "claude") or not self.engine.setting("hub.enabled"):
+            return
+        from ..hub import router
+        r = router.route(self.engine.hub.registry, intent.text, intent.target)
+        if r is None:
+            return
+        if not r.agent:
+            self.toast(r.reason, 7000)
+            return
+        if r.redirect and self.ask_yes_no("Quem tem a ferramenta", r.reason + f"\n\nEnviar este pedido para a "
+                                          f"{router.AGENTS[r.agent]}?"):
+            intent.target = r.agent
+        if intent.target == r.agent:
+            perms["mcp"] = True       # her own, already-configured MCP is allowed for this task
+            self.toast(f"{router.AGENTS[r.agent]} vai usar “{r.capability}” "
+                       + ("(verificado)." if r.verified else "(configurado, ainda não testado)."), 5000)
 
     def observations(self) -> list[tuple[str, str]]:
         """[(what, kind)] the assistants can currently see or hear. kind: abas | microfone | tela"""
@@ -1192,6 +1248,10 @@ class MainWindow(QMainWindow):
             noise=self.store.get_setting("voice.noise", "normal"))
         try:
             self.live_session.start()
+            if self.engine.setting("hub.enabled"):   # a persistent session: config changes now need a restart
+                import time as _t
+                for a in ("codex", "claude"):
+                    self.engine.hub.registry.sessions[a] = _t.time()
         except Exception as exc:
             self.live_window.on_event({"type": "error", "message": f"Não foi possível abrir o microfone: {exc}"})
             self.live_session = None
@@ -1205,6 +1265,8 @@ class MainWindow(QMainWindow):
             self.live_session.set_agent(agent)
 
     def stop_live(self):
+        if self.engine._hub is not None:
+            self.engine.hub.registry.sessions.clear()
         s, self.live_session = self.live_session, None
         lw, self.live_window = self.live_window, None
         if lw is not None:
@@ -1526,7 +1588,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_hotkey", None) is not None:
             self._hotkey.stop()
             self._hotkey = None
-        for t in (self._audio_timer, self._limits_timer, self._timer, self._observe_timer):
+        for t in (self._audio_timer, self._limits_timer, self._timer, self._observe_timer, self._hub_timer):
             t.stop()
         if self._listener in self.engine.listeners:
             self.engine.listeners.remove(self._listener)

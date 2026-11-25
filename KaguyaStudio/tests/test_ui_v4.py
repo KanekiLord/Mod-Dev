@@ -58,6 +58,10 @@ class UiBase(unittest.TestCase):
         root = Path(self.tmp.name)
         os.environ["KAGUYA_HOME"] = str(root / "home")
         self.addCleanup(os.environ.pop, "KAGUYA_HOME")
+        os.environ["KAGUYA_HUB_HOME"] = str(root / "clientes")    # the Hub never reads the test machine's configs
+        os.environ["FAKE_HOME"] = str(root / "clientes")
+        self.addCleanup(os.environ.pop, "KAGUYA_HUB_HOME")
+        self.addCleanup(os.environ.pop, "FAKE_HOME")
         make_fake_clis(root / "bin")
         self.project = root / "Projeto Ação"
         git_init(self.project)
@@ -1164,6 +1168,88 @@ class ObservationUi(UiBase):
         stop.trigger()
         self.assertTrue(w.observe_btn.isHidden())
         self.assertEqual(w.browser.shares.shared_tabs(), [])
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class HubUi(UiBase):
+    def _clients(self):
+        home = Path(os.environ["KAGUYA_HUB_HOME"])
+        (home / ".codex").mkdir(parents=True)
+        (home / ".claude.json").write_text(json.dumps({"mcpServers": {"blockbench": {
+            "command": "node", "args": ["bb.js"], "env": {"BB_TOKEN": "sk-proj-segredoDoTeste1234567890"}}}}),
+            encoding="utf-8")
+        (home / ".codex" / "config.toml").write_text('[mcp_servers.blender]\ncommand = "uvx"\nargs = ["blender-mcp"]\n',
+                                                     encoding="utf-8")
+        return home
+
+    def test_panel_sync_filters_test_install_remove_route_and_web_only(self):
+        from kaguya.ui.page_hub import PlanDialog
+        home = self._clients()
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        w.go("hub")
+        page = w.hub_page
+        self.assertTrue(self.pump(lambda: page.table.rowCount() >= 2, 30))
+        names = [page.table.item(r, 0).text() for r in range(page.table.rowCount())]
+        self.assertIn("blockbench", names)
+        self.assertIn("habilitado", page.summary.text())
+        page.f_provider.setCurrentIndex(page.f_provider.findData("codex"))
+        self.assertEqual([page.table.item(r, 0).text() for r in range(page.table.rowCount())], ["blender"])
+        page.f_provider.setCurrentIndex(0)
+        page._select(next(e.id for e in w.engine.hub.registry.all() if e.name == "blockbench"))
+        detail = page.detail.toPlainText()
+        self.assertIn("BB_TOKEN", detail)
+        self.assertNotIn("segredoDoTeste", detail)
+        got = {}
+        page.test_selected(False, done=lambda r: got.update(r=r))              # official health check (fake CLI)
+        self.assertTrue(self.pump(lambda: "r" in got, 30))
+        self.assertTrue(got["r"]["ok"], got["r"])
+        self.assertEqual(w.engine.hub.registry.get(next(e.id for e in w.engine.hub.registry.all()
+                                                         if e.name == "blockbench")).state, "conectado")
+
+        class Approve(PlanDialog):
+            def exec(self):
+                self.reviewed.setChecked(True)
+                return 1
+
+        class Refuse(PlanDialog):
+            def exec(self):
+                return 0
+        plan = page.request_install({"provider": "claude", "scope": "user", "name": "kaguya-teste", "command": "node",
+                                     "args": ["srv.js"], "env": {"KEY": "valor-secreto-999"}, "origin": "teste"},
+                                    dialog=Refuse)
+        self.assertEqual(plan.status, "recusada")                               # said no: nothing ran
+        self.assertNotIn("kaguya-teste", (home / ".claude.json").read_text())
+        done = {}
+        page.request_install({"provider": "claude", "scope": "user", "name": "kaguya-teste", "command": "node",
+                              "args": ["srv.js"], "env": {"KEY": "valor-secreto-999"}, "origin": "teste"},
+                             dialog=Approve, done=lambda p: done.update(p=p))
+        self.assertTrue(self.pump(lambda: "p" in done, 30))
+        self.assertEqual(done["p"].status, "executada", done["p"].result)
+        self.assertIn("kaguya-teste", (home / ".claude.json").read_text())
+        self.assertTrue(self.pump(lambda: any(e.name == "kaguya-teste" for e in w.engine.hub.registry.all()), 10))
+        self.assertFalse(any(b"valor-secreto-999" in f.read_bytes() for f in (w.engine.home / "hub").rglob("*")
+                             if f.is_file()))
+        dlg = PlanDialog(w, done["p"])
+        self.addCleanup(dlg.deleteLater)
+        from PySide6.QtWidgets import QDialogButtonBox
+        self.assertFalse(dlg.buttons.button(QDialogButtonBox.Ok).isEnabled())    # must tick "revisei" first
+        page.refresh_table()
+        page._select(next(e.id for e in w.engine.hub.registry.all() if e.name == "kaguya-teste"))
+        rm = {}
+        page.remove_selected(dialog=Approve, done=lambda p: rm.update(p=p))
+        self.assertTrue(self.pump(lambda: "p" in rm, 30))
+        self.assertNotIn("kaguya-teste", (home / ".claude.json").read_text())
+        # routing: Kaguya asked for Blockbench, only Miwa has it → offered to Miwa, MCP allowed for that task
+        w.ask_yes_no = lambda title, text: True
+        self.assertTrue(w.send_message("Kaguya, cria um cubo no Blockbench", "codex", ""))
+        task = self.store.tasks(pid)[0]
+        self.assertEqual(task["target"], "claude")
+        self.assertTrue(task["allow_mcp"])
+        page.register_web("Canva", "ChatGPT Web")
+        page.f_status.setCurrentIndex(page.f_status.findData("somente_web"))
+        self.assertEqual([page.table.item(r, 0).text() for r in range(page.table.rowCount())], ["Canva"])
 
 
 def tearDownModule():

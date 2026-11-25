@@ -27,6 +27,16 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Extension Hub — 5.8.0
+
+- `test_hub.py` (casas falsas de Claude/Codex + CLIs falsas que editam a configuração como as oficiais): todo o checklist
+  do pacote (ver tabela em `docs/EXTENSION_HUB.md`), incluindo delegação e lock/backup numa tarefa real do motor.
+- `test_ui_v4.py › HubUi`: página sincroniza sozinha, filtros, detalhes sem segredos, teste oficial, recusar plano não
+  roda nada, aprovar instala/remove pelo comando oficial, roteamento Kaguya → Miwa com MCP liberado, plugin só da web.
+- **Real** (Claude Code 2.1.332 e Codex 0.172 neste servidor): descoberta de 32 itens; `claude mcp get`, handshake no
+  Codex, `claude plugin details`; ciclo instalar → testar → remover nos dois clientes; servidor quebrado reportado como
+  falha; segredos fora do catálogo; MCPs de teste removidos ao final.
+
 ## Etapa D — 5.7.0 (Leitor Universal + conhecimento)
 
 - `test_reader.py` (arquivos reais gerados por python-docx/openpyxl/python-pptx, PDF montado à mão): log de 5.000
