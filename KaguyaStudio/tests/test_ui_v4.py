@@ -1,6 +1,8 @@
 """UI smoke tests (Qt offscreen) with fake CLIs. Skipped when PySide6 is not installed."""
 import json
 import os
+
+import numpy as np
 if os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0:
     os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")   # Chromium refuses to run as root otherwise
 from pathlib import Path
@@ -201,9 +203,75 @@ if __name__ == "__main__":
 @unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
 class LiveUi(UiBase):
     def test_live_window_full_turn_with_fake_claude(self):
+        from kaguya.ui.live_window import LiveWindow
+        self._full_turn(LiveWindow)
+
+    def test_live_chibi_full_turn_with_fake_claude(self):
+        from kaguya.ui.live_chibi import LiveChibi
+        self._full_turn(LiveChibi)
+
+    def test_chibi_animation_follows_the_conversation(self):
+        from kaguya.ui.live_chibi import LiveChibi
+        w = self.window()
+        c = LiveChibi(w)
+        self.addCleanup(c.deleteLater)
+        c.set_agent("claude")
+        miwa = c.chibi("claude")
+        self.assertIs(c._anim, miwa.seq["acenando"])                     # greets when the Live starts
+        self.assertTrue(c._once)
+        c._once = False
+        c.set_state("thinking")
+        self.assertIs(c._anim, miwa.seq["pensando"])
+        c._since -= 5                                                     # thinking for a while → laptop
+        c._pose()
+        self.assertIs(c._anim, miwa.seq["trabalhando"])
+        w.voice.level = lambda: 0.0                                       # speaking, but silence in the audio
+        c.set_state("speaking")
+        self.assertIn(c._anim, [miwa.seq[n] for n in ("fala_neutra", "explicando", "explicando2", "animada")])
+        c._pos, c._next_frame = 3, 0
+        c._tick()
+        self.assertEqual(c._pos, 0)                                       # mouth closed in the pause
+        w.voice.level = lambda: 0.6
+        c._next_frame = 0
+        c._tick()
+        self.assertEqual(c._pos, 1)                                       # moves only while there is voice
+        c.on_event({"type": "error", "message": "codex indisponível"})
+        self.assertIs(c._anim, miwa.seq["seria"])
+        self.assertIn("codex indisponível", c.err.text())
+        c.on_event({"type": "caption", "role": "assistant", "agent": "claude", "text": "Pronto!"})
+        self.assertEqual(c.bubble, "Pronto!")
+        c.set_agent("codex")                                              # switching shows Kaguya greeting
+        self.assertIs(c._anim, c.chibi("codex").seq["carinhosa"])
+        img = c.grab().toImage()
+        self.assertEqual((img.width(), img.height()), (300, 430))
+        from PySide6.QtTest import QTest
+        from PySide6.QtCore import QPoint, Qt
+        QTest.mousePress(c, Qt.LeftButton, pos=QPoint(150, 300))
+        QTest.mouseRelease(c, Qt.LeftButton, pos=QPoint(150, 300))
+        self.assertEqual(self.store.get_setting("live.chibi.pos"), [c.x(), c.y()])
+        c._timer.stop()
+
+    def test_live_style_setting_picks_the_window(self):
+        from kaguya.ui.live_chibi import LiveChibi
+        from unittest import mock
+        w = self.window()
+        w.voice_problems = lambda: []
+        bg = mock.patch("kaguya.ui.main_window.run_bg", lambda *a, **k: None)   # no model loading in this test
+        bg.start()
+        self.addCleanup(bg.stop)
+        w.start_live("claude")
+        self.assertIsInstance(w.live_window, LiveChibi)                   # default: small chibi
+        w.live_window.close()
+        self.store.set_setting("live.style", "janela")
+        w.start_live("claude")
+        from kaguya.ui.live_window import LiveWindow
+        self.assertIsInstance(w.live_window, LiveWindow)
+        w.live_window.close()
+
+    def _full_turn(self, window_cls):
         from unittest import mock
         from kaguya.live.session import LiveSession
-        from kaguya.ui.live_window import LiveWindow
+        LiveWindow = window_cls
         pid = self.store.add_project("Projeto", self.project)
         w = self.window()
         w.select_project(pid)
@@ -642,6 +710,48 @@ class VoicesUi(UiBase):
             self.assertIn(word, seen[0])
         self.assertFalse(engine_dir(w.engine.home, "qwen3").exists())         # nothing downloaded or created
         self.assertIsNone(page._installer)
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class KaguyaV3(UiBase):
+    def test_portrait_variant_talks_and_keeps_soft_edges(self):
+        w = self.window()
+        m = w.mascots["codex"]
+        self.assertIn("v3", dict(m.variants()))
+        m.set_variant("v3")
+        self.addCleanup(m.set_variant, "v2")
+        img = m.image()
+        self.assertGreater(img.width(), 200)
+        alphas = {img.pixelColor(x, y).alpha() for x in range(0, img.width(), 3) for y in range(0, img.height(), 3)}
+        self.assertGreater(len(alphas), 10)                               # not forced to the pixel-art cut-out
+        seq = m.talk_sequence()
+        self.assertTrue(seq)
+        self.assertTrue(all(p.is_file() for p, _ in seq))
+        m.set_state("speaking")
+        self.assertIsNotNone(m.talk_frame)
+        m.set_state("idle")
+
+
+class ChibiAssets(unittest.TestCase):
+    def test_every_frame_exists_is_transparent_and_same_size(self):
+        from PIL import Image
+        root = Path(__file__).resolve().parents[1] / "assets" / "mascots"
+        for folder, size in (("kaguya_chibi", 128), ("miwa_chibi", 256)):
+            man = json.loads((root / folder / "manifest.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(len(man["sequences"]), 7)
+            for seq, spec in man["sequences"].items():
+                for f in spec["frames"]:
+                    im = Image.open(root / folder / f)
+                    self.assertEqual((im.mode, im.size), ("RGBA", (size, size)), f)
+                    self.assertEqual(im.getpixel((0, 0))[3], 0, f)        # transparent corner: no box around her
+            for need in ("fala_neutra", "pensando", "surpresa", "seria"):
+                self.assertIn(need, man["sequences"])
+            self.assertTrue((root / folder / "pacote_original").is_dir())  # originals kept
+        for name in ("neutra", "falando", "feliz", "surpresa"):
+            im = Image.open(root / "kaguya_v3" / "expressoes" / f"kaguya_{name}.png")
+            self.assertEqual(im.mode, "RGBA")
+            alphas = set(np.asarray(im.getchannel("A")).ravel().tolist())
+            self.assertGreater(len(alphas), 10)                           # soft edges (not a hard cut-out)
 
 
 @unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")

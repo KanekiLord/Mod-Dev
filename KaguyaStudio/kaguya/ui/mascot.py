@@ -44,6 +44,14 @@ VARIANTS = {
                           "cancelled": "entediada", "limit": "dormindo", "speaking": "falando", "listening": "surpresa",
                           "thinking": "pensando", "approved": "confiante", "rejected": "entediada"}},
         "v1": {"label": "Kaguya V1 (18 expressões + animações)", "animated": True},
+        # portraits the user sent with real transparency (2026-11): smooth art, not pixel art → no crisp cut-out
+        "v3": {"folder": "kaguya_v3", "prefix": "kaguya", "label": "Kaguya V3 (retrato, fala e gestos)",
+               "animated": False, "crisp": False,
+               "expressions": ["neutra", "falando", "feliz", "surpresa", "explicando", "carinhosa", "confiante",
+                               "sorriso", "oferecendo"],
+               "states": {"idle": "neutra", "running": "sorriso", "success": "feliz", "error": "surpresa",
+                          "cancelled": "sorriso", "limit": "sorriso", "speaking": "falando", "listening": "neutra",
+                          "thinking": "sorriso", "approved": "confiante", "rejected": "explicando"}},
     },
     "claude": {
         "v2": {"folder": "miwa_v2", "prefix": "miwa", "label": "Miwa V2 (fala e gestos)", "animated": False,
@@ -63,6 +71,10 @@ TALK = {
         "talk_basic": {"frames": [1, 2, 3, 4, 3, 2], "ms": 150, "weight": 4},
         "talk_explaining": {"frames": [1, 2, 3, 4, 5, 6], "ms": 160, "weight": 2},
         "talk_warm": {"frames": [1, 2, 3, 4, 5, 6], "ms": 170, "weight": 2}}},
+    ("codex", "v3"): {"path": "fala/{seq}/{seq}_{i:02d}.png", "sequences": {   # frame 1 = mouth closed
+        "retrato_fala": {"frames": [1, 2, 3, 4, 3, 2], "ms": 150, "weight": 4},
+        "retrato_explicando": {"frames": [1, 2, 3, 4, 5, 6], "ms": 170, "weight": 2},
+        "retrato_animada": {"frames": [1, 2, 3, 4, 5, 6], "ms": 170, "weight": 2}}},
     ("claude", "v2"): {"path": "fala/{seq}/{seq}_{i:02d}.png", "sequences": {
         "fala_normal": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 4},
         "explicando": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 2},
@@ -217,9 +229,10 @@ class Mascot(QObject):
 
     def image(self) -> QImage:
         path = self.sprite_path(self.expression)
-        key = (str(path), self.prefs.crisp)
+        crisp = self.prefs.crisp and self.profile.get("crisp", True)
+        key = (str(path), crisp)
         if key not in self._cache:
-            self._cache[key] = load_sprite(path, self.prefs.crisp)
+            self._cache[key] = load_sprite(path, crisp)
         return self._cache[key]
 
     def set_state(self, state: str):

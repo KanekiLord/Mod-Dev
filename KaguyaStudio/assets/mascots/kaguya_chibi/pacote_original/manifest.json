@@ -1,0 +1,98 @@
+{
+  "name": "Kaguya Chibi Talk V1",
+  "description": "Sprites extraidos da cartela visual chibi; 7 sequencias de 7 quadros, 128x128 RGBA",
+  "authoring_note": "Quadros gerados por IA a partir de cartela visual; nao sao interpolacao cinematica e podem apresentar pequenas mudancas de desenho entre frames.",
+  "frame_width": 128,
+  "frame_height": 128,
+  "fps_suggested": 7,
+  "frame_durations_ms": [
+    180,
+    135,
+    135,
+    160,
+    130,
+    140,
+    180
+  ],
+  "background": "transparent (RGBA)",
+  "frames_per_animation": 7,
+  "sequences": {
+    "fala_neutra": [
+      "frames/fala_neutra_01.png",
+      "frames/fala_neutra_02.png",
+      "frames/fala_neutra_03.png",
+      "frames/fala_neutra_04.png",
+      "frames/fala_neutra_05.png",
+      "frames/fala_neutra_06.png",
+      "frames/fala_neutra_07.png"
+    ],
+    "explicando": [
+      "frames/explicando_01.png",
+      "frames/explicando_02.png",
+      "frames/explicando_03.png",
+      "frames/explicando_04.png",
+      "frames/explicando_05.png",
+      "frames/explicando_06.png",
+      "frames/explicando_07.png"
+    ],
+    "animada": [
+      "frames/animada_01.png",
+      "frames/animada_02.png",
+      "frames/animada_03.png",
+      "frames/animada_04.png",
+      "frames/animada_05.png",
+      "frames/animada_06.png",
+      "frames/animada_07.png"
+    ],
+    "carinhosa": [
+      "frames/carinhosa_01.png",
+      "frames/carinhosa_02.png",
+      "frames/carinhosa_03.png",
+      "frames/carinhosa_04.png",
+      "frames/carinhosa_05.png",
+      "frames/carinhosa_06.png",
+      "frames/carinhosa_07.png"
+    ],
+    "pensando": [
+      "frames/pensando_01.png",
+      "frames/pensando_02.png",
+      "frames/pensando_03.png",
+      "frames/pensando_04.png",
+      "frames/pensando_05.png",
+      "frames/pensando_06.png",
+      "frames/pensando_07.png"
+    ],
+    "surpresa": [
+      "frames/surpresa_01.png",
+      "frames/surpresa_02.png",
+      "frames/surpresa_03.png",
+      "frames/surpresa_04.png",
+      "frames/surpresa_05.png",
+      "frames/surpresa_06.png",
+      "frames/surpresa_07.png"
+    ],
+    "seria": [
+      "frames/seria_01.png",
+      "frames/seria_02.png",
+      "frames/seria_03.png",
+      "frames/seria_04.png",
+      "frames/seria_05.png",
+      "frames/seria_06.png",
+      "frames/seria_07.png"
+    ]
+  },
+  "format": {
+    "frames": "PNG RGBA",
+    "sheets": "PNG RGBA",
+    "preview": "GIF/APNG"
+  },
+  "suggested_events": {
+    "fala_neutra": "tts_started",
+    "explicando": "explaining",
+    "animada": "success",
+    "carinhosa": "friendly",
+    "pensando": "thinking",
+    "surpresa": "warning",
+    "seria": "error"
+  }
+}

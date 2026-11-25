@@ -927,8 +927,12 @@ class MainWindow(QMainWindow):
         if self.wake.running:  # one microphone user at a time: the name listener resumes after Live
             self.wake.stop()
             self._wake_resume = True
-        from .live_window import LiveWindow
-        self.live_window = LiveWindow(self)
+        if self.store.get_setting("live.style", "chibi") == "janela":
+            from .live_window import LiveWindow
+            self.live_window = LiveWindow(self)
+        else:   # default: a small floating chibi of the active assistant
+            from .live_chibi import LiveChibi
+            self.live_window = LiveChibi(self)
         self.live_window.set_agent(agent)
         self.live_window.show()
         self.live_window.on_event({"type": "state", "state": "preparing"})

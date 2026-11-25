@@ -1,0 +1,94 @@
+{
+ "name": "Kaguya Chibi (Live)",
+ "frame_size": 128,
+ "fps_suggested": 7,
+ "frame_durations_ms": [
+  180,
+  135,
+  135,
+  160,
+  130,
+  140,
+  180
+ ],
+ "source": "pacote_original/ (kaguya_chibi_talk_v1)",
+ "sequences": {
+  "fala_neutra": {
+   "frames": [
+    "frames/fala_neutra_01.png",
+    "frames/fala_neutra_02.png",
+    "frames/fala_neutra_03.png",
+    "frames/fala_neutra_04.png",
+    "frames/fala_neutra_05.png",
+    "frames/fala_neutra_06.png",
+    "frames/fala_neutra_07.png"
+   ]
+  },
+  "explicando": {
+   "frames": [
+    "frames/explicando_01.png",
+    "frames/explicando_02.png",
+    "frames/explicando_03.png",
+    "frames/explicando_04.png",
+    "frames/explicando_05.png",
+    "frames/explicando_06.png",
+    "frames/explicando_07.png"
+   ]
+  },
+  "animada": {
+   "frames": [
+    "frames/animada_01.png",
+    "frames/animada_02.png",
+    "frames/animada_03.png",
+    "frames/animada_04.png",
+    "frames/animada_05.png",
+    "frames/animada_06.png",
+    "frames/animada_07.png"
+   ]
+  },
+  "carinhosa": {
+   "frames": [
+    "frames/carinhosa_01.png",
+    "frames/carinhosa_02.png",
+    "frames/carinhosa_03.png",
+    "frames/carinhosa_04.png",
+    "frames/carinhosa_05.png",
+    "frames/carinhosa_06.png",
+    "frames/carinhosa_07.png"
+   ]
+  },
+  "pensando": {
+   "frames": [
+    "frames/pensando_01.png",
+    "frames/pensando_02.png",
+    "frames/pensando_03.png",
+    "frames/pensando_04.png",
+    "frames/pensando_05.png",
+    "frames/pensando_06.png",
+    "frames/pensando_07.png"
+   ]
+  },
+  "surpresa": {
+   "frames": [
+    "frames/surpresa_01.png",
+    "frames/surpresa_02.png",
+    "frames/surpresa_03.png",
+    "frames/surpresa_04.png",
+    "frames/surpresa_05.png",
+    "frames/surpresa_06.png",
+    "frames/surpresa_07.png"
+   ]
+  },
+  "seria": {
+   "frames": [
+    "frames/seria_01.png",
+    "frames/seria_02.png",
+    "frames/seria_03.png",
+    "frames/seria_04.png",
+    "frames/seria_05.png",
+    "frames/seria_06.png",
+    "frames/seria_07.png"
+   ]
+  }
+ }
+}

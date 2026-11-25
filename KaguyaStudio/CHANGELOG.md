@@ -1,5 +1,23 @@
 # Changelog
 
+## 5.6.0 — 25/11/2026 (Live com chibis + Kaguya V3)
+
+### Novo
+- **Modo Live com chibi**: em vez da janela grande, um **chibi flutuante** da IA ativa (Kaguya ou Miwa), pequeno,
+  transparente, sempre visível e arrastável (a posição é lembrada). Balão de fala com a última frase, nome e estado
+  ("Ouvindo", "Pensando…", "Falando"), brilho que reage ao microfone e 4 botões redondos: mudo, trocar de IA,
+  silenciar a voz e encerrar. A janela grande continua em Configurações › Voz › Visual do Modo Live.
+- Animação de verdade conforme a conversa: acena ao começar (Miwa) / carinhosa (Kaguya), **pensando** enquanto entende
+  e responde — a Miwa abre o notebook se demorar —, sequências de **fala** que só se mexem quando há voz no áudio (boca
+  fecha nas pausas), atenta quando você fala, séria quando dá erro.
+- Sprites: o pacote **kaguya_chibi_talk_v1** (7 sequências × 7 quadros) e as duas folhas da **Miwa chibi**
+  (recortadas pelos espaços entre as figuras, com efeitos ?, !, ♥ junto da figura certa; as duas folhas desenham a
+  personagem em tamanhos diferentes e foram igualadas para ela não "crescer" entre quadros). Originais guardados em
+  `pacote_original/`. Ferramenta: `tools/recortar_chibis.py`.
+- **Kaguya V3 (retrato, fala e gestos)**: as imagens transparentes enviadas viraram uma variante com 9 expressões e
+  3 animações de fala (boca fechada no quadro 1), com bordas suaves. Escolha em Configurações › Mascotes › Visual da
+  Kaguya (a V2 continua padrão).
+
 ## 5.5.0 — 25/11/2026 (Etapa C: Kaguya Browser + YouTube Intelligence)
 
 ### Novo — Navegador (menu › Navegador)

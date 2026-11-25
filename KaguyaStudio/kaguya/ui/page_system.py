@@ -605,6 +605,13 @@ class SettingsPage(QWidget):
                                     "o que é voz de verdade. Vale para o Live, chamar pelo nome e o botão Falar.")
         self.noise_combo.currentIndexChanged.connect(self._noise_changed)
         vform.addRow("Filtro de ruído", self.noise_combo)
+        self.live_style = QComboBox()
+        self.live_style.addItem("Chibi flutuante (pequeno, sempre visível)", "chibi")
+        self.live_style.addItem("Janela grande", "janela")
+        self.live_style.setCurrentIndex(max(0, self.live_style.findData(win.store.get_setting("live.style", "chibi"))))
+        self.live_style.currentIndexChanged.connect(
+            lambda: win.store.set_setting("live.style", self.live_style.currentData()))
+        vform.addRow("Visual do Modo Live", self.live_style)
         self.mic_dev = QComboBox()
         self.out_dev = QComboBox()
         self.mic_dev.currentIndexChanged.connect(lambda: self._save_dev("input", self.mic_dev))

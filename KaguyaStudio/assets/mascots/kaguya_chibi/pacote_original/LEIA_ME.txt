@@ -1,0 +1,20 @@
+KAGUYA CHIBI TALK - PACOTE V1
+
+49 quadros PNG 128x128 com alpha, 7 estados com 7 quadros cada.
+
+PASTAS
+frames/ - PNGs individuais
+sheets/ - spritesheets horizontais e uma grade 7x7
+animations/ - GIF e PNG animado (APNG) para previsualizar
+demo/ - exemplo HTML local (abrir index.html)
+manifest.json - metadados e eventos sugeridos
+
+USO NO APP
+- Escolha o estado pelo contexto (neutra, explicando etc.)
+- Reproduza quadros da lista em loop com tempos do manifest.
+- Em silêncio, interrompa o loop e mostre o primeiro quadro.
+- Para lip-sync real com áudio use visemas/analisador de áudio; estes quadros simulam fala, não sincronizam fonemas.
+
+ATENCAO
+Origem: cartela de referência gerada por IA. Em algumas animações pode haver pequenas variações de detalhes e poses.
+Arte individual exportada em PNG com fundo transparente. A folha original pode conter artefatos residuais semi-transparentes nas bordas.

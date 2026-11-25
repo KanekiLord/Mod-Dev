@@ -27,6 +27,16 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Live com chibis — 5.6.0
+
+- `test_ui_v4.py › LiveUi`: a conversa completa do Live (Claude falso) roda igual com a **janela grande e com o chibi**;
+  o chibi acena ao começar, pensa, abre o notebook se demorar, fala só quando há voz (boca fechada na pausa), fica
+  sério no erro, mostra o balão, troca de IA e lembra a posição; a configuração escolhe chibi (padrão) ou janela.
+- `ChibiAssets`: todo quadro existe, é RGBA, do mesmo tamanho (Kaguya 128, Miwa 256) e com canto transparente;
+  originais guardados; retratos da V3 com borda suave. `KaguyaV3`: variante carrega, fala e não sofre o recorte de
+  pixel art.
+- Visual conferido em captura (Kaguya ouvindo, Miwa falando, Miwa ouvindo você).
+
 ## Etapa C — 5.5.0 (Kaguya Browser + YouTube Intelligence)
 
 - `test_browser.py`: endereço vs pesquisa; favoritos/histórico (anônima não grava, sem duplicar); compartilhamento por
