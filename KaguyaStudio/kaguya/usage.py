@@ -139,9 +139,12 @@ class AppServerClient:
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
             try:
-                msg = self.responses.get(timeout=max(0.05, deadline - time.monotonic()))
+                msg = self.responses.get(timeout=0.25)
             except queue.Empty:
-                break
+                if self.proc.poll() is not None and not self._reader.is_alive() and self.responses.empty():
+                    raise OSError(f"o 'codex app-server' encerrou (código {self.proc.returncode}); "
+                                  "esta versão pode não ter o servidor de app")
+                continue
             if msg.get("id") == rid:
                 return msg
         raise TimeoutError(f"codex app-server não respondeu a {method}")

@@ -36,23 +36,52 @@ def bridge() -> Bridge:
     return _bridge
 
 
+_threads: set[threading.Thread] = set()
+_threads_lock = threading.Lock()
+
+
+def _deliver(fn) -> None:
+    try:
+        bridge().call.emit(fn)
+    except RuntimeError:  # application/window already closing: drop the late result
+        pass
+
+
 def run_bg(fn, on_done=None, on_error=None) -> threading.Thread:
     """Run ``fn`` in a thread; deliver result/error back on the GUI thread."""
     def worker():
         try:
-            result = fn()
-        except Exception as exc:  # reported to the UI, never swallowed
-            tb = traceback.format_exc()
-            if on_error:
-                bridge().call.emit(lambda: on_error(exc, tb))
-            else:
-                print(tb, file=sys.stderr)
-            return
-        if on_done:
-            bridge().call.emit(lambda: on_done(result))
+            try:
+                result = fn()
+            except Exception as exc:  # reported to the UI, never swallowed
+                tb = traceback.format_exc()
+                if on_error:
+                    _deliver(lambda: on_error(exc, tb))
+                else:
+                    print(tb, file=sys.stderr)
+                return
+            if on_done:
+                _deliver(lambda: on_done(result))
+        finally:
+            with _threads_lock:
+                _threads.discard(threading.current_thread())
     t = threading.Thread(target=worker, daemon=True)
+    with _threads_lock:
+        _threads.add(t)
     t.start()
     return t
+
+
+def wait_background(timeout: float = 30) -> None:
+    """Wait for background jobs (used on shutdown and by tests)."""
+    import time
+    end = time.monotonic() + timeout
+    while True:
+        with _threads_lock:
+            alive = [t for t in _threads if t.is_alive()]
+        if not alive or time.monotonic() > end:
+            return
+        alive[0].join(max(0.05, min(1.0, end - time.monotonic())))
 
 
 _hidden_windows: list[QWidget] = []

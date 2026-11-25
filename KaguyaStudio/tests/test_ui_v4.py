@@ -71,8 +71,14 @@ class UiSmoke(unittest.TestCase):
         w.show()
         self.addCleanup(w.deleteLater)
         self.addCleanup(w.detach)
+        self.addCleanup(self._wait_bg)
         self.addCleanup(lambda: [self.engine.wait(p["id"], 30) for p in self.store.projects()])
         return w
+
+    def _wait_bg(self):
+        from kaguya.ui.common import wait_background
+        wait_background(30)
+        self.app.processEvents()
 
     def pump(self, cond, timeout=30):
         end = time.time() + timeout

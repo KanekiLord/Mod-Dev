@@ -960,4 +960,6 @@ class MainWindow(QMainWindow):
             if m.window:
                 m.window.close()
         self.detach()
+        from .common import wait_background
+        wait_background(5)
         super().closeEvent(e)
