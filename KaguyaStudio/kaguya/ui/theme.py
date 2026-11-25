@@ -113,6 +113,10 @@ def stylesheet() -> str:
 QMainWindow, QWidget#Root {{ background: {c['ink']}; }}
 QToolTip {{ background: {c['elevated']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 6px 8px; border-radius: 6px; }}
 QLabel {{ background: transparent; }}
+QSlider::groove:horizontal {{ height: 6px; background: {c['border']}; border-radius: 3px; }}
+QSlider::sub-page:horizontal {{ background: {c['violet_d']}; border-radius: 3px; }}
+QSlider::handle:horizontal {{ background: {c['gold']}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }}
+QSlider::handle:horizontal:hover {{ background: {c['violet']}; }}
 QLabel[role="muted"] {{ color: {c['muted']}; }}
 QLabel[role="dim"] {{ color: {c['dim']}; }}
 QLabel[role="section"] {{ color: {c['dim']}; font-size: 8pt; font-weight: 600; letter-spacing: 1.5px; }}

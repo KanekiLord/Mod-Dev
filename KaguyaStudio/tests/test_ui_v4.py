@@ -142,7 +142,7 @@ class UiSmoke(UiBase):
 
     def test_all_pages_render_without_projects(self):
         w = self.window()
-        for key in ("chat", "webchats", "queue", "memory", "agents", "usage", "diag", "settings"):
+        for key in ("home", "chat", "webchats", "queue", "memory", "agents", "persona", "usage", "diag", "settings"):
             w.go(key)
             self.app.processEvents()
             self.assertFalse(w.grab().isNull())
@@ -490,21 +490,62 @@ class TalkingMascots(UiBase):
 
 @unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
 class PersonaUi(UiBase):
-    def test_settings_card_saves_personality(self):
+    def test_personality_page_global_project_and_names(self):
         from kaguya import persona
-        from kaguya.ui.page_system import PersonaCard
+        pid = self.store.add_project("Projeto", self.project)
         w = self.window()
-        w.go("settings")
-        card = w.settings.findChildren(PersonaCard)[0]
-        f = card.forms["claude"]
-        f["preset"].setCurrentIndex(f["preset"].findData("tsundere"))
-        f["nickname"].setText("senpai")
-        f["nickname"].editingFinished.emit()
-        f["extra"].setPlainText("chama bugs de Akatsuki")
+        w.select_project(pid)
+        w.go("persona")
+        page = w.persona_page
+        miwa, kaguya = page.editors["claude"], page.editors["codex"]
+        miwa.preset.setCurrentIndex(miwa.preset.findData("tsundere"))   # preset also moves the sliders
+        self.assertEqual(miwa.sliders["humor"][0].value(), 60)
+        miwa.nickname.setText("senpai")
+        miwa.name.setText("Miwa-chan")
+        miwa.sliders["detail"][0].setValue(15)
+        miwa.save()
         p = persona.load(self.store, "claude")
-        self.assertEqual((p.preset, p.nickname, p.extra), ("tsundere", "senpai", "chama bugs de Akatsuki"))
-        self.assertIn("Tsundere", f["preview"].text())
-        self.assertEqual(persona.load(self.store, "codex").preset, "kaguya")  # the other one untouched
+        self.assertEqual((p.preset, p.nickname, p.name, p.detail), ("tsundere", "senpai", "Miwa-chan", 15))
+        self.assertEqual(persona.load(self.store, "codex").preset, "kaguya")   # Kaguya untouched
+        self.assertEqual(w.mascots["claude"].profile["name"], "Miwa-chan")      # name shown in the UI
+        self.assertIn("Miwa-chan", miwa.preview.toPlainText())
+        # per-project override
+        page.scope.setCurrentIndex(page.scope.findData(pid))
+        kaguya.preset.setCurrentIndex(kaguya.preset.findData("profissional"))
+        kaguya.save()
+        self.assertEqual(persona.load(self.store, "codex", pid).preset, "profissional")
+        self.assertEqual(persona.load(self.store, "codex").preset, "kaguya")
+        page.clear_project()
+        self.assertFalse(persona.has_project_override(self.store, "codex", pid))
+        page.scope.setCurrentIndex(0)
+        miwa.reset()
+        self.assertEqual(w.mascots["claude"].profile["name"], "Miwa")
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class HomeAndPause(UiBase):
+    def test_home_shows_real_state_and_pause_all_stops_everything(self):
+        from kaguya.desktop import control
+        pid = self.store.add_project("NarutoCD", self.project)
+        w = self.window()
+        w.select_project(pid)
+        self.store.enqueue(pid, "codex", "criar HUD", "later")
+        self.store.set_autonomous(pid, True)
+        w.go("home")
+        self.assertEqual(w.home.q_stats["parked"].value_label.text(), "1")
+        self.assertIn("NarutoCD", [w.home.p_list.itemAt(i).widget().text().strip()
+                                   for i in range(w.home.p_list.count())])
+        modes = [w.home.mode_box.itemAt(i).widget() for i in range(w.home.mode_box.count())]
+        self.assertTrue(modes)
+        self.assertIn("indisponível", w.home.ai_rows["codex"][3].text())   # no invented quota
+        # a long task is running → Pausar tudo cancels it and raises the computer-control stop flag
+        self.engine.env["FAKE_CLAUDE_SLEEP"] = "5"
+        w.send_message("rodar a análise longa", "claude", "")
+        self.assertTrue(self.pump(lambda: self.engine.is_running(pid), 10))
+        stopped = w.pause_all()
+        self.assertIn("NarutoCD", stopped)
+        self.assertTrue(self.pump(lambda: not self.engine.is_running(pid), 30))
+        self.assertIn(self.store.tasks(pid)[0]["status"], ("cancelled", "interrupted"))
+        self.assertIn("Pausar tudo", control.stop_reason(self.engine.home / "desktop"))
 
 
 def tearDownModule():

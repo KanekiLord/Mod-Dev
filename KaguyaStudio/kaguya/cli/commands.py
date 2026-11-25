@@ -23,6 +23,14 @@ READ_TOOLS = ["Read", "Glob", "Grep", "LS", "TodoWrite", "Agent", "Task"]
 WRITE_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 COMMAND_TOOLS = ["Bash", "PowerShell"]
+# Secrets are never read or changed by the assistants, in any task (verified with Claude Code 2.1.331:
+# "File is in a directory that is denied by your permission settings"). Codex gets the same rule in the prompt.
+SENSITIVE_GLOBS = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx", "**/id_rsa*",
+                   "**/id_ed25519*", "**/.ssh/**", "**/.aws/**", "**/.azure/**", "**/.git-credentials", "**/.netrc",
+                   "**/.npmrc", "**/.pypirc", "**/credentials.json", "**/*.kdbx", "**/.codex/auth.json",
+                   "**/.claude/.credentials.json"]
+SENSITIVE_DENY = [f"{tool}({g})" for tool in ("Read", "Edit", "Write", "Grep") for g in SENSITIVE_GLOBS]
+
 # "Meu computador": deleting the user's files in bulk is never done through the shell (the assistant must ask
 # with the confirm tool and delete precise files)
 PC_DENY = [f"{tool}({pat})" for tool in ("Bash", "PowerShell") for pat in (
@@ -87,6 +95,7 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         denied += WEB_TOOLS
     if not opts.mcp and not opts.desktop:
         denied.append("mcp__*")
+    denied += SENSITIVE_DENY
     if opts.autonomous or opts.pc:
         denied += AUTONOMY_DENY
     if opts.pc:

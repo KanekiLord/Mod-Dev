@@ -250,8 +250,7 @@ def _capture(app, win, args) -> int:
     w, h = (int(x) for x in args.tamanho.lower().split("x"))
     win.resize(w, h)
     win.show()
-    if args.pagina != "chat":
-        win.go(args.pagina)
+    win.go(args.pagina)
     if args.flutuantes:
         for m in win.mascots.values():
             m.show_window()

@@ -117,6 +117,9 @@ if name == "claude":
             sys.exit(1)
         sid = "11111111-2222-4333-8444-555555555555"
         out({"type": "system", "subtype": "init", "session_id": sid, "model": "claude-test", "tools": ["Read"]})
+        if os.environ.get("FAKE_CLAUDE_SLEEP"):  # a long task (to test cancellation)
+            import time as _t
+            _t.sleep(float(os.environ["FAKE_CLAUDE_SLEEP"]))
         if "--mcp-config" in args:
             # like the real CLI: start every configured MCP server and use the desktop tools once
             cfg = json.load(open(args[args.index("--mcp-config") + 1], encoding="utf-8"))

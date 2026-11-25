@@ -2,8 +2,8 @@
 
 * ``DEPOIS:`` / ``IDEIA:`` go to the queue and **never** reach a running agent, so an idea
   "para depois" cannot make the agents switch tasks.
-* ``AGORA:`` is an execute request that asks the UI for confirmation before interrupting.
-* ``@codex: / @claude: / @equipe:`` choose the destination.
+* ``AGORA:`` / ``URGENTE:`` is an execute request that asks the UI for confirmation before interrupting.
+* ``@codex: / @claude: / @equipe:`` (or ``@kaguya`` / ``@miwa``) choose the destination.
 * ``PARALELO:`` followed by lines ``@codex: ...`` / ``@claude: ...`` describes independent
   sub-tasks that run in separate Git worktrees.
 """
@@ -12,8 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 
-_TARGET = re.compile(r"^\s*@\s*(codex|claude|equipe)\s*:?\s*", re.I)
-_INTENT = re.compile(r"^\s*(depois|ideia|agora|paralelo)\s*:\s*", re.I)
+_TARGET = re.compile(r"^\s*@\s*(codex|claude|equipe|kaguya|miwa)\s*:?\s*", re.I)
+_INTENT = re.compile(r"^\s*(depois|ideia|agora|urgente|paralelo)\s*:\s*", re.I)
+_ALIASES = {"kaguya": "codex", "miwa": "claude"}
 
 
 @dataclass
@@ -39,7 +40,7 @@ def classify_message(text: str, default_target: str = "equipe") -> Intent:
     for _ in range(4):
         m = _TARGET.match(value)
         if m:
-            target = m.group(1).lower()
+            target = _ALIASES.get(m.group(1).lower(), m.group(1).lower())
             value = value[m.end():].strip()
             continue
         m = _INTENT.match(value)
@@ -49,7 +50,7 @@ def classify_message(text: str, default_target: str = "equipe") -> Intent:
                 kind = "later"
             elif label == "ideia":
                 kind = "idea"
-            elif label == "agora":
+            elif label in ("agora", "urgente"):
                 interrupt = True
             else:
                 parallel = True

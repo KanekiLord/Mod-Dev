@@ -13,6 +13,13 @@ NAMES = {
     "claude": ["miwa", "miua", "mi wa", "miva", "mihwa", "miwah", "miuá", "claude", "cloud", "clode"],
 }
 _GREET = r"(?:ei|ey|hey|oi|ola|olá|e ai|eai|fala)"
+CUSTOM: dict[str, list[str]] = {"codex": [], "claude": []}
+
+
+def set_custom_name(agent: str, name: str) -> None:
+    """A name chosen in the personality editor also wakes that assistant."""
+    n = _norm(name).strip()
+    CUSTOM[agent] = [n] if n and n not in NAMES.get(agent, []) and len(n) >= 3 else []
 
 
 def _norm(t: str) -> str:
@@ -25,6 +32,7 @@ def detect_name(text: str, anywhere: bool = False) -> tuple[str | None, str]:
     greeting) unless ``anywhere`` is set — avoids triggering on "a Kaguya disse…" in a conversation."""
     n = _norm(text)
     for agent, names in NAMES.items():
+        names = names + CUSTOM.get(agent, [])
         alt = "|".join(re.escape(x) for x in sorted(names, key=len, reverse=True))
         pat = (rf"^\W*(?:{_GREET}\W+)?(?:{alt})\b(?:\s*\((?:codex|claude(?: code)?)\))?[\s,.:;!?-]*" if not anywhere
                else rf"\b(?:{alt})\b[\s,.:;!?-]*")

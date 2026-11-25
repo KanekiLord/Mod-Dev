@@ -29,8 +29,8 @@ from .theme import AGENT, C
 from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
-NAV = [("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
-       ("agents", "agents", "Agentes e skills"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
+NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
+       ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
 
@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         self.resize(1480, 920)
         self.setMinimumSize(1180, 720)
         self.mascots = {a: Mascot(a, engine.home / f"mascote_{a}.json") for a in ("codex", "claude")}
+        self.apply_persona_names()
         from .page_chat import set_portrait_source
         from .widgets import load_sprite
         set_portrait_source(lambda a: load_sprite(self.mascots[a].sprite_path("neutra"), True)
@@ -161,6 +162,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+L"), self, lambda: self.chat.composer.edit.setFocus())
         QShortcut(QKeySequence("Ctrl+M"), self, lambda: self.chat.composer.mic_btn.toggle())
         QShortcut(QKeySequence("Ctrl+Shift+L"), self, lambda: self.start_live(None))
+        QShortcut(QKeySequence("Ctrl+Shift+Pause"), self, self.pause_all)
         self.live_session = None
         self.live_window = None
         self.desktop_overlay = None
@@ -170,6 +172,7 @@ class MainWindow(QMainWindow):
         self.wake = WakeController(self)
         from .assistant_ui import AssistantWatcher
         self.assistant = AssistantWatcher(self)
+        self._later(0, lambda: self.go(self.store.get_setting("ui.start_page", "home")))
         self._wake_resume = False
         self.setup_tray()
         self.refresh_all()
@@ -187,6 +190,10 @@ class MainWindow(QMainWindow):
         self.header = Header(self.demo)
         if self.demo:
             self.header.right.addWidget(Pill("MODO DEMONSTRAÇÃO • CLIs simuladas", C["warning"]))
+        self.pause_btn = button("Pausar tudo", "pause", "danger", "Para todas as IAs, o controle do PC, o Live, a escuta "
+                                "por nome e a fala — na hora (Ctrl+Shift+Pause)")
+        self.pause_btn.clicked.connect(self.pause_all)
+        self.header.right.addWidget(self.pause_btn)
         self.header.right.addWidget(Pill(f"v{VERSION}", C["gold"]))
         v.addWidget(self.header)
         body = QHBoxLayout()
@@ -208,7 +215,11 @@ class MainWindow(QMainWindow):
         self.settings = SettingsPage(self)
         from .page_webchats import WebChatsPage
         self.webchats = WebChatsPage(self)
-        self.pages = {"chat": self.chat, "webchats": self.webchats, "queue": self.queue, "memory": self.memory, "agents": self.agents,
+        from .page_persona import PersonaPage
+        self.persona_page = PersonaPage(self)
+        from .page_home import HomePage
+        self.home = HomePage(self)
+        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)
@@ -803,6 +814,26 @@ class MainWindow(QMainWindow):
         self.refresh_status()
         return True
 
+    def pause_all(self):
+        """Panic button: stop every assistant activity now (tasks, computer control, Live, name listener, speech)."""
+        stopped = []
+        for p in self.store.projects():
+            if self.engine.cancel(p["id"]):
+                stopped.append(p["name"])
+        from ..desktop import control
+        control.request_stop(self.engine.home / "desktop", "Pausar tudo")
+        if self.live_window is not None:
+            self.live_window.close()
+            stopped.append("Live")
+        if self.wake.running:
+            self.wake.stop()
+            self.sync_wake_ui()
+            stopped.append("escuta por nome")
+        self.voice.stop_speaking()
+        self.toast("Tudo pausado" + (f": {', '.join(stopped)}." if stopped else " (nada estava rodando).")
+                   + " Tarefas interrompidas podem ser reenfileiradas na Fila.", 7000)
+        return stopped
+
     def stop_task(self):
         if self.pid is not None and self.engine.cancel(self.pid):
             self.toast("Interrupção solicitada…")
@@ -862,6 +893,22 @@ class MainWindow(QMainWindow):
             return exes
         run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd),
                lambda exc, tb: (self.live_window and self.live_window.on_event({"type": "error", "message": str(exc)})))
+
+    def apply_persona_names(self):
+        """Character names from the personality editor (persona_id) — CLI providers are untouched."""
+        from .. import persona
+        from ..live import wake
+        from . import mascot as mascot_mod
+        for a in ("codex", "claude"):
+            name = persona.display_name(self.store, a)
+            AGENT[a]["mascot"] = name
+            mascot_mod.PROFILES[a]["name"] = name
+            wake.set_custom_name(a, name)
+        for m in getattr(self, "mascots", {}).values():
+            m.changed.emit()
+            if m.window:
+                m.window.setWindowTitle(f"{m.profile['name']} — {m.profile['agent']}")
+                m.window.update()
 
     def open_pc_mode(self):
         """Select "Meu computador" (explained once: what the assistants may do outside projects)."""
@@ -936,7 +983,7 @@ class MainWindow(QMainWindow):
             if isinstance(res, Exception):
                 raise res
             exe, _caps = res
-            style = persona.for_agent(store, a, voice=True)
+            style = persona.for_agent(store, a, voice=True, pid=self.pid)
             if a == "claude":
                 return ClaudeConversation(exe, cwd, model=store.get_setting("live.model_claude", "haiku"), env=engine.env,
                                           on_rate_limit=engine._record_claude_limit, extra_instructions=style)
@@ -1418,6 +1465,7 @@ class MainWindow(QMainWindow):
         self.tray_wake.toggled.connect(lambda on: self.set_wake(on))
         menu.addAction("Modo Live", lambda: (self.show_from_tray(), self.start_live(None)))
         menu.addAction("Mostrar/ocultar mascotes", lambda: [m.toggle_window() for m in self.mascots.values()])
+        menu.addAction("Pausar tudo", self.pause_all)
         menu.addSeparator()
         menu.addAction("Sair", self.quit_app)
         self.tray.setContextMenu(menu)

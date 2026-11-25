@@ -20,6 +20,7 @@ import time
 from typing import Callable
 import uuid
 
+from ..cli.commands import SENSITIVE_DENY
 from ..env import child_env
 
 LIVE_INSTRUCTIONS = (
@@ -61,7 +62,8 @@ class ClaudeConversation:
     def _start(self):
         cmd = [self.exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                "--include-partial-messages", "--permission-mode", "dontAsk", "--allowedTools", "Read,Glob,Grep,LS",
-               "--disallowedTools", "Bash,PowerShell,Edit,Write,MultiEdit,NotebookEdit,mcp__*",
+               "--disallowedTools", ",".join(["Bash", "PowerShell", "Edit", "Write", "MultiEdit", "NotebookEdit", "mcp__*",
+                                              *SENSITIVE_DENY]),
                "--append-system-prompt", self.instructions]
         if self.model:
             cmd += ["--model", self.model]

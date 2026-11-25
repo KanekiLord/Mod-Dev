@@ -1,5 +1,32 @@
 # Changelog
 
+## 5.0.0 — 25/11/2026 (Etapa A do pacote de evolução)
+
+Auditoria do pacote × código atual em `docs/AUDITORIA_PACOTE_2026-11-25.md` (matriz de lacunas com evidências).
+
+### Novo
+- **Página Personalidades** (spec 04): Kaguya e Miwa lado a lado — nome editável (vale na interface e no "chamar
+  pelo nome"; o provedor Codex/Claude não muda), estilo (Kaguya/Miwa clássicas, profissional, descontraída,
+  estrategista, professora, fofa, tsundere, gamer, personalizada), apelido, tratamento, saudação, terceira pessoa,
+  iniciativa própria (só erros / marcos / conversa livre / silenciosa), **7 controles** (formalidade, humor,
+  iniciativa, empatia, criatividade, objetividade, detalhe), emojis, texto livre, voz neural e visual.
+  Perfil **global ou só do projeto atual**, **exportar/importar JSON** (aceita o formato do pacote), **restaurar padrão**,
+  "Ouvir apresentação" (voz local) e **prévia do texto enviado à IA**. Em tarefas técnicas a personagem fica fora de
+  comandos, código e relatórios. Perfis da 4.9.0 são convertidos automaticamente.
+- **Início**: painel com estado real — IAs (diagnóstico e limite só se oficial), fila (executando, na fila, guardadas,
+  para revisar, última concluída), projetos, Segundo Cérebro (notas indexadas, aprendizados em revisão), modos ativos
+  e atalhos (Conversar, Live, Chamar pelo nome, Meu computador, Personalidades, ChatGPT/Claude).
+- **Pausar tudo** (cabeçalho, bandeja e Ctrl+Shift+Pause): para todas as tarefas, o controle do PC, o Live, a escuta
+  por nome e a fala de uma vez.
+- **Segredos protegidos**: as IAs não leem nem alteram `.env`, chaves (`.pem`, `.key`, `id_rsa`…), `.ssh`, `.aws`,
+  credenciais e arquivos de login das CLIs — bloqueado pelo próprio Claude Code (verificado de verdade) e pela regra
+  no texto para o Codex. Conteúdo de sites/vídeos/arquivos é tratado como dado não confiável.
+- `URGENTE:` (igual a `AGORA:`), `@kaguya:` e `@miwa:` na conversa.
+
+### Corrigido
+- Captura automática no `.exe` sem console: a proteção contra travamento escreve em arquivo (antes abria uma caixa de
+  erro do PyInstaller e o CI ficava parado).
+
 ## 4.9.0 — 25/11/2026
 
 ### Novo

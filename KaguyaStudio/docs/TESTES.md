@@ -27,6 +27,17 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Etapa A — 5.0.0
+
+- `test_persona.py`: padrões, controles e textos; conversão do formato 4.9.0; ajuste por projeto; nome personalizado
+  no "chamar pelo nome"; exportar/importar (inclusive o formato `personalidades.exemplo.json` do pacote); restaurar;
+  personalidade **depois** das regras no texto enviado à CLI.
+- `test_ui_v4.py › PersonaUi`: estilo move os controles, salvar não afeta a outra IA, nome aparece na mascote, ajuste por
+  projeto e remoção, restaurar devolve o nome. `HomeAndPause`: Início mostra dados reais (fila, projeto, modos, limite
+  indisponível); Pausar tudo cancela tarefa longa em execução e aciona a parada do controle do PC.
+- **Real (Claude Code 2.1.331)**: com as regras do Studio, `.env` e `sub/.env.local` foram negados ("File is in a directory
+  that is denied by your permission settings") e um arquivo comum foi lido normalmente.
+
 ## Instalador, fala animada e personalidade (4.9.0)
 
 - **CI Windows** (passo "Instalador"): gera o instalador com Inno Setup, instala em silêncio só para o usuário,

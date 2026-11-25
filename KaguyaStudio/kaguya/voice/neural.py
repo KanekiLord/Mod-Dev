@@ -34,7 +34,7 @@ class Preset:
 
 PRESETS = {p.id: p for p in (
     Preset("kaguya", "Kaguya — Dora com toque japonês", (("pf_dora", 0.65), ("jf_alpha", 0.35)), 1.0),
-    Preset("claude", "Claude — Dora calorosa", (("pf_dora", 0.6), ("af_heart", 0.4)), 1.02),
+    Preset("claude", "Miwa — Dora calorosa", (("pf_dora", 0.6), ("af_heart", 0.4)), 1.02),
     Preset("dora", "Dora — pt-BR natural (feminina)", (("pf_dora", 1.0),), 1.0),
     Preset("suave", "Suave — Dora com toque japonês 2", (("pf_dora", 0.65), ("jf_nezumi", 0.35)), 0.97),
     Preset("alex", "Alex — pt-BR (masculina)", (("pm_alex", 1.0),), 1.0),
