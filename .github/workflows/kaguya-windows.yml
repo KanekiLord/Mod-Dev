@@ -1,0 +1,74 @@
+name: Kaguya Studio (Windows)
+
+on:
+  push:
+    paths:
+      - "KaguyaStudio/**"
+      - ".github/workflows/kaguya-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: KaguyaStudio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Dependências do Studio
+        run: python -m pip install -r requirements.txt pyinstaller pillow
+
+      - name: CLIs oficiais (instaladas sem login, sem chaves)
+        run: npm install -g @openai/codex @anthropic-ai/claude-code
+
+      - name: Testes automatizados (inclui CLIs reais sem conta)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          KAGUYA_TEST_REAL_CLIS: "1"
+          PYTHONIOENCODING: utf-8
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Capturas no Windows (100/125/150/200%)
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          New-Item -ItemType Directory -Force capturas | Out-Null
+          python -m kaguya --demo --captura capturas/win_chat_100.png --tamanho 1366x740
+          python -m kaguya --demo --captura capturas/win_chat_125.png --escala 1.25 --tamanho 1536x830 --flutuantes
+          python -m kaguya --demo --captura capturas/win_chat_150.png --escala 1.5 --tamanho 1280x690
+          python -m kaguya --demo --captura capturas/win_chat_200.png --escala 2 --tamanho 1920x1040
+          python -m kaguya --demo --captura capturas/win_diag_100.png --pagina diag
+          python -m kaguya --demo --captura capturas/win_memory_100.png --pagina memory
+          Get-ChildItem capturas
+
+      - name: Build do executável (PyInstaller)
+        run: python tools/build_windows.py
+
+      - name: Fumaça do executável (abre e renderiza Diagnóstico)
+        shell: pwsh
+        run: |
+          $env:KAGUYA_HOME = "$env:RUNNER_TEMP\kaguya-exe"
+          $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--captura","capturas\win_exe_diag.png","--pagina","diag" -PassThru -Wait
+          if (-not (Test-Path capturas\win_exe_diag.png)) { throw "executável não gerou a captura (código $($p.ExitCode))" }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capturas-windows
+          path: KaguyaStudio/capturas/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KaguyaStudio-windows
+          path: KaguyaStudio/dist/KaguyaStudio-*-windows.zip

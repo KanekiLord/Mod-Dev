@@ -1,0 +1,2 @@
+# Kaguya Studio 4 — interface
+PySide6>=6.6

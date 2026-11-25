@@ -65,11 +65,39 @@ def _setup_demo() -> dict:
             "project": project, "vault": vault, "base": base}
 
 
+def _install_crash_log():
+    """Unhandled errors go to a log file and a dialog instead of a silent exit."""
+    import traceback
+    from datetime import datetime
+
+    def hook(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        try:
+            from ..appdirs import data_dir
+            from ..env import redact
+            log = data_dir() / "logs" / f"erro_{datetime.now():%Y%m%d_%H%M%S}.txt"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(redact(text), encoding="utf-8")
+        except Exception:
+            log = None
+        sys.__stderr__ and sys.__stderr__.write(text)
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance():
+                QMessageBox.critical(None, "Kaguya Studio — erro inesperado",
+                                     f"{exc_type.__name__}: {exc}\n\nDetalhes salvos em:\n{log}")
+        except Exception:
+            pass
+    sys.excepthook = hook
+
+
 def main(argv=None) -> int:
     args = _args(sys.argv[1:] if argv is None else argv)
+    if not args.captura:
+        _install_crash_log()
     if args.escala:
         os.environ["QT_SCALE_FACTOR"] = str(args.escala)
-    if args.captura:
+    if args.captura and sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     demo = _setup_demo() if args.demo else None
 
