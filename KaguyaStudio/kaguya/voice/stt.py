@@ -40,47 +40,52 @@ def status(model_dir: Path, model: str = "small") -> VoiceStatus:
 
 
 def input_devices() -> list[tuple[int, str]]:
-    try:
-        import sounddevice as sd
-        return [(i, d["name"]) for i, d in enumerate(sd.query_devices()) if d.get("max_input_channels", 0) > 0]
-    except Exception:
-        return []
+    from .devices import list_devices
+    return [(d.index, d.name) for d in list_devices()[0]]
 
 
 class Recorder:
-    """Push-to-talk recorder. ``level`` callback receives 0..1 for the UI meter."""
+    """Push-to-talk recorder. Records at the device's own rate and converts to 16 kHz.
+    ``level`` receives 0..1 for the UI meter."""
 
     def __init__(self, device: int | None = None, max_seconds: int = 90, level=None):
         self.device, self.max_seconds, self.level = device, max_seconds, level
         self._chunks = []
         self._stream = None
         self._started = 0.0
+        self.rate = SAMPLE_RATE
 
     def start(self) -> None:
-        import numpy as np
         import sounddevice as sd
+        from .devices import level_of
         self._chunks = []
         self._started = time.monotonic()
+        try:
+            info = sd.query_devices(self.device, "input")
+            self.rate = int(info.get("default_samplerate") or SAMPLE_RATE)
+        except Exception:
+            self.rate = SAMPLE_RATE
 
         def cb(data, frames, t, status_):
             self._chunks.append(data.copy())
             if self.level:
-                self.level(float(min(1.0, np.abs(data).mean() * 12)))
+                self.level(level_of(data))
             if time.monotonic() - self._started > self.max_seconds:
                 raise sd.CallbackStop()
-        self._stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", device=self.device,
+        self._stream = sd.InputStream(samplerate=self.rate, channels=1, dtype="float32", device=self.device,
                                       callback=cb)
         self._stream.start()
 
     def stop(self):
         import numpy as np
+        from .devices import resample
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
         if not self._chunks:
             return np.zeros(0, dtype="float32")
-        return np.concatenate(self._chunks)[:, 0]
+        return resample(np.concatenate(self._chunks)[:, 0], self.rate, SAMPLE_RATE)
 
 
 class Transcriber:

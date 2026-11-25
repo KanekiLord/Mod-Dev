@@ -173,6 +173,7 @@ class Composer(Card):
     stop = Signal()
     speak = Signal()
     mic = Signal(bool)
+    devices = Signal()
 
     def __init__(self):
         super().__init__(padding=12, radius=16, accent=C["gold"])
@@ -204,7 +205,10 @@ class Composer(Card):
         self.mic_btn.toggled.connect(self.mic.emit)
         self.speak_btn = button("Ouvir", "volume", "ghost", "Ler a última resposta (voz local do Windows)")
         self.speak_btn.clicked.connect(self.speak.emit)
+        self.dev_btn = button("", "settings", "ghost", "Escolher microfone e fone")
+        self.dev_btn.clicked.connect(self.devices.emit)
         row.addWidget(self.mic_btn)
+        row.addWidget(self.dev_btn)
         row.addWidget(self.speak_btn)
         self.lay.addLayout(row)
         perms = QHBoxLayout()

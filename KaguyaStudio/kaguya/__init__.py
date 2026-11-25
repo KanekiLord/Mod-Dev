@@ -6,5 +6,5 @@ agents run through the official, already-authenticated CLIs.
 """
 from __future__ import annotations
 
-VERSION = "4.1.2"
+VERSION = "4.2.0"
 APP_NAME = "Kaguya Studio"

@@ -16,7 +16,8 @@ _PS_SPEAK = (
     "else{$pt=$s.GetInstalledVoices()|?{$_.VoiceInfo.Culture.Name -like 'pt*'}|select -First 1;"
     "if($pt){$s.SelectVoice($pt.VoiceInfo.Name)}};"
     "$s.Rate=[int]$env:KAGUYA_TTS_RATE; $s.Volume=[int]$env:KAGUYA_TTS_VOLUME;"
-    "$s.Speak([Console]::In.ReadToEnd())"
+    "$w=$env:KAGUYA_TTS_WAV; if($w){$s.SetOutputToWaveFile($w)};"
+    "$s.Speak([Console]::In.ReadToEnd()); $s.Dispose()"
 )
 _PS_VOICES = ("Add-Type -AssemblyName System.Speech;"
               "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices()|"
@@ -44,6 +45,8 @@ class Speaker:
         self.voice = ""
         self.rate = 1
         self.volume = 100
+        self.output_device: int | None = None   # None = Windows default output
+        self._stop = threading.Event()
 
     @staticmethod
     def backend() -> str | None:
@@ -69,6 +72,7 @@ class Speaker:
         return bool(self.proc and self.proc.poll() is None)
 
     def stop(self) -> None:
+        self._stop.set()
         with self._lock:
             if self.proc and self.proc.poll() is None:
                 try:
@@ -82,9 +86,12 @@ class Speaker:
         if not text:
             return False
         self.stop()
+        self._stop = threading.Event()
         backend = self.backend()
         if backend is None:
             return False
+        if os.name == "nt" and self.output_device is not None:
+            return self._speak_to_device(text, on_done)
         env = dict(os.environ)
         if os.name == "nt":
             env.update(KAGUYA_TTS_VOICE=self.voice or "", KAGUYA_TTS_RATE=str(self.rate), KAGUYA_TTS_VOLUME=str(self.volume))
@@ -114,3 +121,49 @@ class Speaker:
                 on_done()
         threading.Thread(target=wait, daemon=True).start()
         return True
+
+    def _speak_to_device(self, text: str, on_done=None) -> bool:
+        """SAPI renders to a WAV, then it plays on the chosen headset/speaker (interruptible)."""
+        import tempfile
+        from .devices import available, play_wav
+        if not available():
+            self.output_device = None
+            return self.speak(text, on_done)
+        fd, wav = tempfile.mkstemp(suffix=".wav", prefix="kaguya-voz-")
+        os.close(fd)
+        env = dict(os.environ, KAGUYA_TTS_VOICE=self.voice or "", KAGUYA_TTS_RATE=str(self.rate),
+                   KAGUYA_TTS_VOLUME=str(self.volume), KAGUYA_TTS_WAV=wav)
+        stop = self._stop
+
+        def work():
+            try:
+                with self._lock:
+                    self.proc = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", _PS_SPEAK],
+                                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                 env=env, text=True, encoding="utf-8", creationflags=_flags())
+                    proc = self.proc
+                proc.stdin.write(text)
+                proc.stdin.close()
+                proc.wait()
+                if not stop.is_set() and os.path.getsize(wav) > 44:
+                    play_wav(wav, self.output_device, stop)
+            except Exception:
+                pass
+            finally:
+                try:
+                    os.remove(wav)
+                except OSError:
+                    pass
+                if on_done:
+                    on_done()
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    @property
+    def speaking(self) -> bool:  # noqa: F811 - also true while the WAV plays
+        try:
+            import sounddevice as sd
+            playing = bool(sd.get_stream().active)
+        except Exception:
+            playing = False
+        return bool(self.proc and self.proc.poll() is None) or (self.output_device is not None and playing)

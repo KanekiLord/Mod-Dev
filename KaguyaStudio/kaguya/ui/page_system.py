@@ -507,23 +507,41 @@ class SettingsPage(QWidget):
         self.voice_info = label("", "muted", wrap=True)
         vc.lay.addWidget(self.voice_info)
         vform = QFormLayout()
-        self.tts_voice = QComboBox()
-        self.tts_voice.addItem("Automática (pt-BR se instalada)", "")
-        self.tts_voice.currentIndexChanged.connect(lambda: win.store.set_setting("voice.tts_voice", self.tts_voice.currentData()))
+        self.voice_combos = {}
+        for agent, title in (("codex", "Voz da Kaguya (Codex)"), ("claude", "Voz da Claude")):
+            cb = QComboBox()
+            cb.addItem("Automática (pt-BR se instalada)", "")
+            cb.currentIndexChanged.connect(lambda _=0, a=agent, c=cb: win.store.set_setting(f"voice.voice_{a}", c.currentData()))
+            self.voice_combos[agent] = cb
+            vform.addRow(title, cb)
         self.stt_model = QComboBox()
         for k, v in stt.MODELS.items():
             self.stt_model.addItem(f"{k} — {v}", k)
         self.stt_model.setCurrentIndex(list(stt.MODELS).index(win.store.get_setting("voice.model", "small")))
         self.stt_model.currentIndexChanged.connect(lambda: win.store.set_setting("voice.model", self.stt_model.currentData()))
-        self.mic_dev = QComboBox()
-        self.mic_dev.addItem("Microfone padrão do Windows", None)
-        for idx, name in stt.input_devices():
-            self.mic_dev.addItem(name, idx)
-        self.mic_dev.currentIndexChanged.connect(lambda: win.store.set_setting("voice.device", self.mic_dev.currentData()))
-        vform.addRow("Voz de leitura", self.tts_voice)
         vform.addRow("Modelo de transcrição", self.stt_model)
+        self.mic_dev = QComboBox()
+        self.out_dev = QComboBox()
+        self.mic_dev.currentIndexChanged.connect(lambda: self._save_dev("input", self.mic_dev))
+        self.out_dev.currentIndexChanged.connect(lambda: self._save_dev("output", self.out_dev))
         vform.addRow("Microfone", self.mic_dev)
+        vform.addRow("Saída (fone/caixa)", self.out_dev)
+        arow = QHBoxLayout()
+        ref = button("Atualizar dispositivos", "refresh", "ghost")
+        ref.clicked.connect(lambda: self.win.check_audio_devices(force=True))
+        self.mic_test = button("Testar microfone", "mic")
+        self.mic_test.clicked.connect(self.test_mic)
+        self.mic_meter = Meter(C["success"])
+        self.mic_meter.setFixedWidth(160)
+        self.mic_meter.set_value(0)
+        snd = button("Testar som", "volume")
+        snd.clicked.connect(lambda: self.win.voice.speak("Olá! Este é o teste de som do Kaguya Studio.", "codex"))
+        for w in (ref, self.mic_test, self.mic_meter, snd):
+            arow.addWidget(w)
+        arow.addStretch(1)
+        self._filling = False
         vc.lay.addLayout(vform)
+        vc.lay.addLayout(arow)
         self.t_consent = Toggle("Autorizo baixar o modelo de transcrição escolhido (uma vez, fica no computador)",
                                 bool(win.store.get_setting("voice.model_consent", False)))
         self.t_consent.toggled.connect(lambda v: win.store.set_setting("voice.model_consent", v))
@@ -590,11 +608,66 @@ class SettingsPage(QWidget):
             run_bg(Speaker().voices, self._fill_voices)
 
     def _fill_voices(self, voices):
-        cur = self.win.store.get_setting("voice.tts_voice", "")
-        for name, culture in voices:
-            self.tts_voice.addItem(f"{name} ({culture})", name)
-            if name == cur:
-                self.tts_voice.setCurrentIndex(self.tts_voice.count() - 1)
+        for agent, cb in self.voice_combos.items():
+            cur = self.win.store.get_setting(f"voice.voice_{agent}", "") or self.win.store.get_setting("voice.tts_voice", "")
+            for name, culture in voices:
+                cb.addItem(f"{name} ({culture})", name)
+                if name == cur:
+                    cb.setCurrentIndex(cb.count() - 1)
+
+    def fill_devices(self, ins, outs):
+        self._filling = True
+        for combo, devs, key, default in ((self.mic_dev, ins, "voice.input_name", "Microfone padrão do Windows"),
+                                          (self.out_dev, outs, "voice.output_name", "Saída padrão do Windows")):
+            cur = self.win.store.get_setting(key)
+            combo.clear()
+            combo.addItem(default, None)
+            for d in devs:
+                combo.addItem(d.name + ("  (padrão)" if d.default else ""), d.name)
+                if d.name == cur:
+                    combo.setCurrentIndex(combo.count() - 1)
+            if cur and combo.currentData() != cur:
+                combo.addItem(f"{cur}  (desconectado)", cur)
+                combo.setCurrentIndex(combo.count() - 1)
+        self._filling = False
+
+    def _save_dev(self, kind: str, combo):
+        if self._filling:
+            return
+        self.win.store.set_setting(f"voice.{kind}_name", combo.currentData())
+        self.win.refresh_devices_ui()
+
+    def test_mic(self):
+        from ..voice import devices as dv
+        if not dv.available():
+            QMessageBox.information(self, "Microfone", "O acesso ao microfone não está instalado nesta cópia.")
+            return
+        self.mic_test.setEnabled(False)
+        self.mic_test.setText("Fale algo… (3 s)")
+        dev = self.win.voice.input_index()
+        levels = []
+
+        def work():
+            rec = stt.Recorder(dev, max_seconds=4, level=lambda v: (levels.append(v),
+                               self.win.bridge.call.emit(lambda v=v: self.mic_meter.set_value(v * 100))))
+            rec.start()
+            import time as _t
+            _t.sleep(3)
+            rec.stop()
+            return max(levels or [0])
+
+        def done(peak):
+            self.mic_test.setEnabled(True)
+            self.mic_test.setText("Testar microfone")
+            self.mic_meter.set_value(peak * 100)
+            self.win.toast("Microfone funcionando: o Studio captou sua voz." if peak > 0.08 else
+                           "Quase nenhum som captado. Confira o microfone escolhido e a permissão de microfone do Windows.")
+
+        def fail(exc, tb):
+            self.mic_test.setEnabled(True)
+            self.mic_test.setText("Testar microfone")
+            QMessageBox.warning(self, "Microfone", f"Não foi possível abrir o microfone: {exc}")
+        run_bg(work, done, fail)
 
     def _selected_pid(self):
         rows = self.projects.selectionModel().selectedRows()

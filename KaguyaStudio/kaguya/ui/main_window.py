@@ -128,6 +128,12 @@ class MainWindow(QMainWindow):
         self._build()
         self.voice = VoiceController(self)
         self._codex_busy = False
+        self.audio_in, self.audio_out = [], []
+        self._audio_checked = False
+        self._audio_timer = QTimer(self, interval=5000)
+        self._audio_timer.timeout.connect(lambda: self.check_audio_devices())
+        self._audio_timer.start()
+        QTimer.singleShot(1500, lambda: self.check_audio_devices(force=True))
         self._limits_timer = QTimer(self, interval=10 * 60 * 1000)
         self._limits_timer.timeout.connect(lambda: self.refresh_codex_limits())
         self._limits_timer.start()
@@ -194,6 +200,7 @@ class MainWindow(QMainWindow):
         c.stop.connect(self.stop_task)
         c.speak.connect(lambda: self.voice.speak(self.chat.view.last_agent_text))
         c.mic.connect(lambda on: self.voice.ptt(on))
+        c.devices.connect(self.devices_menu)
 
     def _sidebar(self) -> QWidget:
         side = QFrame()
@@ -657,6 +664,65 @@ class MainWindow(QMainWindow):
             self.cli_rows[a].set("verificando…", C["violet"])
             run_bg(lambda a=a: self.engine.diagnose(a, cwd), lambda d: (self.refresh_status(),
                    self.diag.refresh() if self.stack.currentWidget() is self.diag else None))
+
+    # ------------------------------------------------------------------ audio devices
+    def check_audio_devices(self, force: bool = False):
+        """Detect plugged/unplugged microphones and headsets (never while recording or speaking)."""
+        from ..voice import devices as dv
+        if getattr(self, "_audio_busy", False) or not dv.available():
+            return
+        if not force and hasattr(self, "voice") and self.voice.busy:
+            return
+        self._audio_busy = True
+
+        def done(res):
+            self._audio_busy = False
+            ins, outs = res
+            if self._audio_checked:
+                for ch in filter(None, (dv.diff(self.audio_in, ins, "microfone"), dv.diff(self.audio_out, outs, "saída"))):
+                    msg = []
+                    if ch.added:
+                        msg.append(f"{ch.kind.capitalize()} conectado: {', '.join(ch.added)}")
+                    if ch.removed:
+                        msg.append(f"{ch.kind.capitalize()} desconectado: {', '.join(ch.removed)}")
+                    self.toast(" • ".join(msg))
+            for key, lst, kind in (("voice.input_name", ins, "microfone"), ("voice.output_name", outs, "saída")):
+                name = self.store.get_setting(key)
+                if name and not dv.resolve(name, lst) and self._audio_checked and dv.resolve(name, self.audio_in + self.audio_out):
+                    self.toast(f"O {kind} escolhido ({name}) foi desconectado: usando o padrão do Windows até ele voltar.")
+            self._audio_checked = True
+            self.audio_in, self.audio_out = ins, outs
+            self.refresh_devices_ui()
+
+        def fail(exc, tb):
+            self._audio_busy = False
+        run_bg(lambda: dv.list_devices(refresh=True), done, fail)
+
+    def refresh_devices_ui(self):
+        if hasattr(self, "settings"):
+            self.settings.fill_devices(self.audio_in, self.audio_out)
+
+    def devices_menu(self):
+        from PySide6.QtGui import QAction
+        from PySide6.QtWidgets import QMenu
+        from ..voice import devices as dv
+        menu = QMenu(self)
+        if not dv.available():
+            menu.addAction("Acesso ao microfone não instalado nesta cópia").setEnabled(False)
+        for title, key, lst, default in (("MICROFONE", "voice.input_name", self.audio_in, "Padrão do Windows"),
+                                         ("SAÍDA (FONE/CAIXA)", "voice.output_name", self.audio_out, "Padrão do Windows")):
+            menu.addSection(title)
+            cur = self.store.get_setting(key)
+            for name in [None] + [d.name for d in lst]:
+                act = QAction(name or default, menu, checkable=True, checked=(cur == name) or (not cur and name is None))
+                act.triggered.connect(lambda _=False, k=key, n=name: (self.store.set_setting(k, n), self.refresh_devices_ui(),
+                                                                      self.toast(f"Usando: {n or 'padrão do Windows'}")))
+                menu.addAction(act)
+        menu.addSeparator()
+        menu.addAction("Atualizar dispositivos", lambda: self.check_audio_devices(force=True))
+        menu.addAction("Configurações de áudio…", lambda: self.go("settings"))
+        btn = self.chat.composer.dev_btn
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     # ------------------------------------------------------------------ github
     def refresh_github_status(self):

@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.0 — 25/11/2026
+
+### Novo
+- **Microfone e fone**: escolha em Configurações › Voz (pelo nome, sobrevive a reconectar) e troca rápida no botão
+  ao lado de "Falar". Detector automático avisa quando um microfone/fone é conectado ou desconectado e volta ao
+  padrão do Windows se o escolhido sumir.
+- **Testar microfone** com medidor de nível e **Testar som** no dispositivo escolhido.
+- **Uma voz para cada IA** (Kaguya/Codex e Claude), escolhida entre as vozes instaladas no Windows.
+- Gravação na taxa nativa do microfone com conversão para 16 kHz (evita erro em microfones de 44,1/48 kHz).
+
 ## 4.1.2 — 25/11/2026
 
 ### Corrigido

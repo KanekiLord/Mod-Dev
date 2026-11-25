@@ -20,6 +20,21 @@ class VoiceController(QObject):
         self.transcriber: stt.Transcriber | None = None
         self._speaking_agent = None
 
+    # ------------------------------------------------------------------ devices
+    def input_index(self):
+        from ..voice.devices import resolve
+        d = resolve(self.win.store.get_setting("voice.input_name"), getattr(self.win, "audio_in", []))
+        return d.index if d else None
+
+    def output_index(self):
+        from ..voice.devices import resolve
+        d = resolve(self.win.store.get_setting("voice.output_name"), getattr(self.win, "audio_out", []))
+        return d.index if d else None
+
+    @property
+    def busy(self) -> bool:
+        return self.recorder is not None or self.speaker.speaking
+
     # ------------------------------------------------------------------ TTS
     def speak(self, text: str, agent: str | None = None):
         if not text:
@@ -32,8 +47,11 @@ class VoiceController(QObject):
         if Speaker.backend() is None:
             self.win.toast("Leitura por voz indisponível neste sistema.")
             return
-        self.speaker.voice = self.win.store.get_setting("voice.tts_voice", "") or ""
         self._speaking_agent = agent or self._last_agent()
+        st = self.win.store
+        self.speaker.voice = (st.get_setting(f"voice.voice_{self._speaking_agent}", "") or st.get_setting("voice.tts_voice", "")
+                              or "")
+        self.speaker.output_device = self.output_index()
         m = self.win.mascots.get(self._speaking_agent)
         if m:
             m.set_state("speaking")
@@ -76,7 +94,7 @@ class VoiceController(QObject):
                 return
             self.speaker.stop()
             try:
-                self.recorder = stt.Recorder(self.win.store.get_setting("voice.device"))
+                self.recorder = stt.Recorder(self.input_index())
                 self.recorder.start()
             except Exception as exc:
                 btn.setChecked(False)
