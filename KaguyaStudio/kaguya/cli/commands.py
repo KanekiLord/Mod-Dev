@@ -23,6 +23,12 @@ READ_TOOLS = ["Read", "Glob", "Grep", "LS", "TodoWrite", "Agent", "Task"]
 WRITE_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
 COMMAND_TOOLS = ["Bash", "PowerShell"]
+# Autonomous mode runs without confirmations, but some actions stay with the user. These Claude Code
+# permission rules are a first barrier (best effort); the real safety net is the Git restore point.
+AUTONOMY_DENY = [f"{tool}({pat})" for tool in ("Bash", "PowerShell") for pat in (
+    "git push:*", "git remote:*", "git config --global:*", "gh:*", "npm install -g:*", "npm i -g:*",
+    "pip install:*", "pip3 install:*", "winget:*", "choco:*", "scoop:*", "shutdown:*", "format:*",
+    "reg add:*", "reg delete:*", "Remove-Item -Recurse C:*", "rm -rf /:*", "rd /s:*")]
 
 
 @dataclass
@@ -31,6 +37,7 @@ class RunOptions:
     commands: bool = False       # may run shell commands (tests/builds)
     web: bool = False            # may search/fetch the web
     mcp: bool = False            # may use configured MCP servers
+    autonomous: bool = False     # no confirmations: edit + commands + network for builds (Gradle)
     resume: str | None = None    # session/thread id to continue
     model: str | None = None     # e.g. "sonnet"/"haiku" for cheap roles; None = CLI default
     in_git: bool = True
@@ -71,6 +78,8 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         denied += WEB_TOOLS
     if not opts.mcp:
         denied.append("mcp__*")
+    if opts.autonomous:
+        denied += AUTONOMY_DENY
     if denied and (not caps.flags or caps.has("--disallowedTools") or caps.has("--disallowed-tools")):
         cmd += ["--disallowedTools", ",".join(denied)]
     if opts.model:
@@ -85,6 +94,9 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
 
 def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
     cmd = [exe]
+    if opts.autonomous and opts.write and (not caps.flags or caps.has("--config") or caps.has("-c")):
+        # builds such as Gradle need to download dependencies; the sandbox still limits writes to the project
+        cmd += ["-c", "sandbox_workspace_write.network_access=true"]
     if opts.web:
         cmd.append("--search")
     cmd.append("exec")

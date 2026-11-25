@@ -167,3 +167,65 @@ class EngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("git"), "git necessário")
+class AutonomyTests(unittest.TestCase):
+    setUp = EngineTests.setUp
+    engine = EngineTests.engine
+    run_task = EngineTests.run_task
+
+    def test_autonomous_task_runs_without_asking_and_can_be_undone(self):
+        (self.project / "Missao.java").write_text("class Missao {}\n", encoding="utf-8")  # user's uncommitted work
+        eng = self.engine(FAKE_CODEX_WRITE="1")
+        task = self.run_task(eng, "@codex: implementar recompensa em ryō", autonomous=True)
+        self.assertEqual(task["status"], "executed", task["result"])
+        self.assertTrue(task["autonomous"] and task["allow_write"] and task["allow_commands"] and task["run_tests"])
+        self.assertTrue(task["checkpoint"].startswith("refs/kaguya/checkpoints/tarefa-"))
+        call = [c for c in calls(self.bin) if c["cli"] == "codex" and "exec" in c["args"] and "--help" not in c["args"]][-1]
+        self.assertIn("sandbox_workspace_write.network_access=true", call["args"])  # Gradle can download deps
+        self.assertIn("workspace-write", call["args"])
+        self.assertTrue((self.project / "feito_pelo_codex.txt").exists())
+        self.assertEqual(eng.task_changes(task["id"]), ["feito_pelo_codex.txt"])
+        changed = eng.undo_task(task["id"])
+        self.assertEqual(changed, ["feito_pelo_codex.txt"])
+        self.assertFalse((self.project / "feito_pelo_codex.txt").exists())
+        self.assertEqual((self.project / "Missao.java").read_text(encoding="utf-8"), "class Missao {}\n")
+        self.assertEqual(self.store.get_task(task["id"])["checkpoint"], "")
+        with self.assertRaises(ValueError):
+            eng.undo_task(task["id"])
+
+    def test_autonomous_claude_keeps_dangerous_commands_blocked(self):
+        eng = self.engine()
+        self.run_task(eng, "@claude: rodar os testes do mod", autonomous=True)
+        call = [c for c in calls(self.bin) if c["cli"] == "claude" and "-p" in c["args"]][-1]
+        args = call["args"]
+        allowed = args[args.index("--allowedTools") + 1]
+        denied = args[args.index("--disallowedTools") + 1]
+        self.assertIn("Bash", allowed.split(","))
+        self.assertIn("Edit", allowed.split(","))
+        self.assertIn("Bash(git push:*)", denied)
+        self.assertIn("PowerShell(git push:*)", denied)
+        self.assertIn("acceptEdits", args)
+        self.assertNotIn("bypassPermissions", args)
+        prompt_logs = list((self.root / "home" / "logs").rglob("claude.log"))
+        self.assertTrue(prompt_logs)
+
+    def test_autonomous_requires_git(self):
+        plain = self.root / "sem git"
+        plain.mkdir()
+        pid = self.store.add_project("Sem Git", plain)
+        eng = self.engine()
+        tid = eng.submit(pid, classify_message("@codex: algo", "equipe"), autonomous=True)
+        eng.wait(pid, 30)
+        t = self.store.get_task(tid)
+        self.assertNotEqual(t["status"], "executed")
+        self.assertIn("Git", t["result"])
+
+    def test_normal_tasks_have_no_autonomy(self):
+        eng = self.engine()
+        task = self.run_task(eng, "@claude: explique")
+        self.assertFalse(task["autonomous"])
+        self.assertEqual(task["checkpoint"], "")
+        call = [c for c in calls(self.bin) if c["cli"] == "claude" and "-p" in c["args"]][-1]
+        self.assertFalse(any("git push" in a for a in call["args"]))

@@ -395,6 +395,9 @@ class Toggle(QAbstractButton):
 
     def _animate(self, on: bool):
         self._anim.stop()
+        if not self.isVisible():
+            self.set_knob(1.0 if on else 0.0)
+            return
         self._anim.setEndValue(1.0 if on else 0.0)
         self._anim.start()
 

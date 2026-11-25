@@ -27,6 +27,20 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Modo autônomo (4.5.0)
+
+- `test_checkpoint.py` (Git real): o ponto de restauração não altera nada ao ser criado; depois de a "IA" editar,
+  apagar, criar arquivos e até fazer commit, Desfazer volta HEAD, arquivos, arquivos não rastreados e o stage
+  do usuário exatamente como estavam, sem tocar em arquivos ignorados (ex.: `build/`); também em repositório sem commits.
+- `test_engine.py › AutonomyTests`: tarefa autônoma do Codex roda com escrita + comandos + testes, rede liberada no
+  sandbox, cria o ponto de restauração e é desfeita; Claude autônomo libera Edit/Bash mas mantém `git push` etc.
+  bloqueados e nunca usa `bypassPermissions`; sem Git a tarefa autônoma é recusada; tarefas normais não mudam.
+- `test_ui_v4.py › AutonomyUi`: ligar exige aceitar a explicação (recusar mantém desligado), fica salvo por projeto,
+  envio sem diálogo de confirmação, Desfazer na Fila, desligar devolve as chaves manuais; sem Git não liga.
+- **Real (Linux)**: Claude Code 2.1.331 com o comando autônomo do Studio criou arquivo e rodou `git status` sem
+  pedir nada, e recusou `git push` ("Permission to use Bash with command git push --dry-run has been denied").
+  `codex-cli 0.172` aceitou `-c sandbox_workspace_write.network_access=true` (sem login, parou no 401 esperado).
+
 ## Verificado com binários reais (ambiente Linux de desenvolvimento)
 
 - `codex-cli 0.172.0` sem login: diagnóstico "Não autenticado"; `exec` fora do Git agora chega à API e

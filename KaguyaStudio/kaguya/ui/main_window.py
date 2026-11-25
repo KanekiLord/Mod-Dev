@@ -133,12 +133,13 @@ class MainWindow(QMainWindow):
         self._audio_timer = QTimer(self, interval=5000)
         self._audio_timer.timeout.connect(lambda: self.check_audio_devices())
         self._audio_timer.start()
-        QTimer.singleShot(1500, lambda: self.check_audio_devices(force=True))
+        self._detached = False
+        self._later(1500, lambda: self.check_audio_devices(force=True))
         self._limits_timer = QTimer(self, interval=10 * 60 * 1000)
         self._limits_timer.timeout.connect(lambda: self.refresh_codex_limits())
         self._limits_timer.start()
-        QTimer.singleShot(3500, lambda: self.refresh_codex_limits())
-        QTimer.singleShot(2500, lambda: run_bg(self.refresh_github_status))
+        self._later(3500, lambda: self.refresh_codex_limits())
+        self._later(2500, lambda: run_bg(self.refresh_github_status))
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -205,6 +206,7 @@ class MainWindow(QMainWindow):
         c.mic.connect(lambda on: self.voice.ptt(on))
         c.devices.connect(self.devices_menu)
         c.live.connect(lambda: self.start_live(None))
+        c.autonomy.connect(self.set_autonomy)
 
     def _sidebar(self) -> QWidget:
         side = QFrame()
@@ -445,7 +447,47 @@ class MainWindow(QMainWindow):
     def select_project(self, pid: int | None):
         self.pid = pid
         self.store.set_setting("ui.last_project", pid)
+        self.chat.composer.set_autonomous(bool(pid is not None and self.store.autonomous(pid)))
         self.refresh_all()
+
+    def set_autonomy(self, on: bool):
+        """Turn the project's autonomous mode on/off (explained once per project; requires Git)."""
+        comp = self.chat.composer
+        if self.pid is None:
+            comp.set_autonomous(False)
+            if on:
+                QMessageBox.information(self, "Modo autônomo", "Vincule primeiro a pasta de um projeto.")
+            return
+        if on:
+            p = self.store.project(self.pid)
+            if not check_project_folder(p["directory"]).git_root:
+                comp.set_autonomous(False)
+                if QMessageBox.question(self, "Modo autônomo", "O modo autônomo precisa de um repositório Git na pasta do "
+                                        "projeto: é ele que permite desfazer tudo o que as IAs fizerem.\n\n"
+                                        "Criar o repositório agora?") == QMessageBox.Yes:
+                    self.create_git_repo()
+                return
+            key = f"project.{self.pid}.autonomy_consent"
+            if not self.store.get_setting(key, False):
+                msg = ("No modo autônomo, neste projeto, a Kaguya (Codex) e a Claude vão:\n\n"
+                       "• editar arquivos, rodar comandos, builds (Gradle, com acesso à internet para baixar "
+                       "dependências) e testes, e corrigir o que falhar — sem pedir confirmação;\n"
+                       "• executar também as tarefas que você pedir no Modo Live.\n\n"
+                       "Proteções que continuam valendo:\n"
+                       "• antes de cada tarefa o Studio cria um ponto de restauração Git; o botão Desfazer (na Fila) "
+                       "volta todos os arquivos como estavam;\n"
+                       "• push, mudar remotes/configuração global, instalar programas e mexer fora da pasta do projeto "
+                       "continuam bloqueados;\n"
+                       "• você pode parar a qualquer momento (botão Parar) e desligar o modo aqui.\n\n"
+                       "Ativar o modo autônomo para este projeto?")
+                if QMessageBox.question(self, "Ativar modo autônomo?", msg) != QMessageBox.Yes:
+                    comp.set_autonomous(False)
+                    return
+                self.store.set_setting(key, True)
+        self.store.set_autonomous(self.pid, on)
+        self.toast("Modo autônomo ligado: as IAs trabalham sem pedir confirmação (com ponto de restauração Git)."
+                   if on else "Modo autônomo desligado: alterações voltam a pedir sua autorização.")
+        self.refresh_header()
 
     def add_project(self):
         dlg = ProjectDialog(self.store, self)
@@ -514,7 +556,8 @@ class MainWindow(QMainWindow):
         if not chk.ok:
             self.p_git.set("pasta indisponível", C["danger"])
         elif chk.git_root:
-            self.p_git.set("Git ✓" if chk.is_git_root else "Git (subpasta)", C["success"])
+            auto = " • autônomo" if self.store.autonomous(self.pid) else ""
+            self.p_git.set(("Git ✓" if chk.is_git_root else "Git (subpasta)") + auto, C["gold"] if auto else C["success"])
         else:
             self.p_git.set("sem Git: só leitura", C["warning"])
         self.p_git_btn.setVisible(chk.ok and not chk.git_root)
@@ -629,7 +672,9 @@ class MainWindow(QMainWindow):
             perms["web"] = True
         if intent.target == "paralelo":
             perms["write"] = True
-        if perms["write"] and intent.kind == "execute" and intent.target != "paralelo" and not self.confirm_write():
+        auto = bool(perms.get("autonomous")) and intent.kind == "execute"
+        if (perms["write"] and intent.kind == "execute" and intent.target != "paralelo" and not auto
+                and not self.confirm_write()):
             return False
         if intent.interrupt and self.engine.is_running(self.pid):
             if QMessageBox.question(self, "AGORA", "Interromper a tarefa em execução? Ela ficará como 'interrompida' e "
@@ -637,7 +682,7 @@ class MainWindow(QMainWindow):
                 self.engine.cancel(self.pid)
                 self.engine.wait(self.pid, 15)
         tid = self.engine.submit(self.pid, intent, write=perms["write"], web=perms["web"], commands=perms["commands"],
-                                 mcp=perms["mcp"], run_tests=perms["run_tests"])
+                                 mcp=perms["mcp"], run_tests=perms["run_tests"], autonomous=auto)
         self.chat.view.message("user", f"**#{tid} · @{intent.target}**" + (f" · {intent.kind.upper()}" if intent.kind != "execute" else "")
                                + f"  \n{intent.text}")
         if intent.kind == "later":
@@ -749,8 +794,12 @@ class MainWindow(QMainWindow):
                     self.toast("Tarefa falada não registrada: vincule um projeto.")
                     return
                 from ..messages import Intent
-                tid = self.engine.submit(self.pid, Intent("later", a, text))
-                self.toast(f"Tarefa #{tid} guardada na fila (DEPOIS): {text[:80]}")
+                if self.store.autonomous(self.pid):
+                    tid = self.engine.submit(self.pid, Intent("execute", a, text), web=True, autonomous=True)
+                    self.toast(f"Tarefa #{tid} começou no modo autônomo: {text[:80]}")
+                else:
+                    tid = self.engine.submit(self.pid, Intent("later", a, text))
+                    self.toast(f"Tarefa #{tid} guardada na fila (DEPOIS): {text[:80]}")
                 self.refresh_status()
             self.bridge.call.emit(add)
         q = self.voice._ensure_queue()
@@ -1061,7 +1110,14 @@ class MainWindow(QMainWindow):
         except sqlite3.Error as exc:  # never let a storage hiccup break the UI loop
             print(f"Kaguya: evento ignorado ({ev.get('type')}): {exc}", file=sys.stderr)
 
+    def _later(self, ms: int, fn):
+        """One-shot timer tied to this window: never fires after the window is closed/detached."""
+        QTimer.singleShot(ms, self, lambda: None if self._detached else fn())
+
     def detach(self):
+        self._detached = True
+        for t in (self._audio_timer, self._limits_timer, self._timer):
+            t.stop()
         if self._listener in self.engine.listeners:
             self.engine.listeners.remove(self._listener)
         try:

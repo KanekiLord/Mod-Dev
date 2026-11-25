@@ -24,6 +24,13 @@ BASE_RULES = """REGRAS DO KAGUYA STUDIO (valem para toda a tarefa):
    REFERÊNCIAS: lista com "- " de URLs consultadas com data (ou "- nenhuma")
 """
 
+AUTONOMY_RULES = ("MODO AUTÔNOMO (o usuário pediu para você trabalhar sem pedir confirmação): não pare para perguntar — "
+                  "decida com bom senso, implemente, rode os builds/testes (o Gradle pode baixar dependências), corrija "
+                  "o que falhar e só termine quando estiver concluído ou realmente bloqueado. O Studio criou um ponto de "
+                  "restauração Git antes de você começar. Continua proibido: push, alterar remotes ou configuração "
+                  "global, instalar programas no sistema, mexer fora da pasta do projeto e apagar arquivos que não "
+                  "sejam da tarefa. Se precisar de algo assim, registre em PENDÊNCIAS.")
+
 WEB_ON = ("Pesquisa web PERMITIDA: quando a dúvida depender de versão/API/documentação atual, pesquise por iniciativa "
           "própria e traga URL, versão e data de consulta.")
 WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais e as notas fornecidas."
@@ -31,8 +38,10 @@ WEB_OFF = "Pesquisa web NÃO permitida nesta tarefa: use apenas arquivos locais 
 
 def task_prompt(task: str, *, project: str, memory: str = "", agents: list[str] | None = None,
                 web: bool = False, write: bool = False, commands: bool = False, max_subagents: int = 2,
-                role: str = "", extra: str = "") -> str:
+                role: str = "", extra: str = "", autonomous: bool = False) -> str:
     parts = [BASE_RULES.format(max_subagents=max_subagents, web_rule=WEB_ON if web else WEB_OFF)]
+    if autonomous and write:
+        parts.append(AUTONOMY_RULES)
     perms = [f"Edição de arquivos: {'PERMITIDA (repositório Git)' if write else 'NÃO permitida — apenas analise e proponha'}",
              f"Executar comandos/testes: {'PERMITIDO' if commands else 'NÃO permitido'}"]
     parts.append("PERMISSÕES DESTA TAREFA: " + "; ".join(perms) + ".")

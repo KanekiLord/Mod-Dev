@@ -175,6 +175,7 @@ class Composer(Card):
     mic = Signal(bool)
     devices = Signal()
     live = Signal()
+    autonomy = Signal(bool)
 
     def __init__(self):
         super().__init__(padding=12, radius=16, accent=C["gold"])
@@ -225,7 +226,13 @@ class Composer(Card):
         self.t_web = Toggle("Web", True, "Permite que as IAs pesquisem documentação atual por iniciativa própria")
         self.t_tests = Toggle("Testes", False, "O Studio executa os testes do projeto após a implementação")
         self.t_mcp = Toggle("MCPs", False, "Permite usar os servidores MCP já configurados")
+        self.t_auto = Toggle("Autônomo", False, "As IAs editam, rodam comandos, builds e testes e terminam a tarefa sem "
+                             "pedir confirmação. Antes de cada tarefa o Studio cria um ponto de restauração Git "
+                             "(botão Desfazer na Fila). Push, instalações e arquivos fora do projeto continuam bloqueados.")
+        self.t_auto.toggled.connect(self._auto_changed)
+        self._manual = None
         perms.addWidget(label("Permissões", "dim"))
+        perms.addWidget(self.t_auto)
         for t in (self.t_write, self.t_cmds, self.t_web, self.t_tests, self.t_mcp):
             perms.addWidget(t)
         perms.addStretch(1)
@@ -273,7 +280,36 @@ class Composer(Card):
 
     def permissions(self) -> dict:
         return {"write": self.t_write.isChecked(), "commands": self.t_cmds.isChecked(), "web": self.t_web.isChecked(),
-                "run_tests": self.t_tests.isChecked(), "mcp": self.t_mcp.isChecked()}
+                "run_tests": self.t_tests.isChecked(), "mcp": self.t_mcp.isChecked(),
+                "autonomous": self.t_auto.isChecked()}
+
+    def set_autonomous(self, on: bool, notify: bool = False):
+        """Reflect the project's autonomous mode: edit/commands/tests are implied and locked on."""
+        self.t_auto.blockSignals(True)
+        self.t_auto.setChecked(on)
+        self.t_auto.blockSignals(False)
+        self.t_auto.set_knob(1.0 if on else 0.0)
+        self._apply_auto(on)
+        if notify:
+            self.autonomy.emit(on)
+
+    def _auto_changed(self, on: bool):
+        self._apply_auto(on)
+        self.autonomy.emit(on)
+
+    def _apply_auto(self, on: bool):
+        locked = (self.t_write, self.t_cmds, self.t_tests)
+        if on:
+            if self._manual is None:
+                self._manual = [t.isChecked() for t in locked]
+            for t in locked:
+                t.setChecked(True)
+                t.setEnabled(False)
+        else:
+            for t, was in zip(locked, self._manual or [t.isChecked() for t in locked]):
+                t.setEnabled(True)
+                t.setChecked(was)
+            self._manual = None
 
 
 class ChatPage(QWidget):

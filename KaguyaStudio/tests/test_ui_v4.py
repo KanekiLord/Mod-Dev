@@ -70,15 +70,16 @@ class UiBase(unittest.TestCase):
         w.resize(1366, 740)
         w.show()
         self.addCleanup(w.deleteLater)
+        self.addCleanup(self._wait_bg)   # cleanups run in reverse: detach first, then drain
         self.addCleanup(w.detach)
-        self.addCleanup(self._wait_bg)
         self.addCleanup(lambda: [self.engine.wait(p["id"], 30) for p in self.store.projects()])
         return w
 
     def _wait_bg(self):
         from kaguya.ui.common import wait_background
-        wait_background(30)
-        self.app.processEvents()
+        for _ in range(3):  # callbacks delivered by processEvents may start more background work
+            wait_background(30)
+            self.app.processEvents()
 
     def pump(self, cond, timeout=30):
         end = time.time() + timeout
@@ -224,3 +225,62 @@ class LiveUi(UiBase):
             w.start_live(None)
         info.assert_called_once()
         self.assertIsNone(w.live_window)
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class AutonomyUi(UiBase):
+    def test_autonomous_mode_toggle_send_and_undo(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        comp = w.chat.composer
+        self.assertFalse(comp.t_auto.isChecked())
+        with mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.No):
+            comp.t_auto.click()  # user declines the explanation → stays off
+        self.assertFalse(comp.t_auto.isChecked())
+        self.assertFalse(self.store.autonomous(pid))
+        with mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.Yes) as q:
+            comp.t_auto.click()
+        q.assert_called_once()
+        self.assertTrue(self.store.autonomous(pid))
+        self.assertTrue(comp.t_write.isChecked() and not comp.t_write.isEnabled())
+        self.assertTrue(comp.t_cmds.isChecked() and comp.t_tests.isChecked())
+        # remembered per project, explanation not repeated
+        w.select_project(None)
+        self.assertFalse(comp.t_auto.isChecked())
+        w.select_project(pid)
+        self.assertTrue(comp.t_auto.isChecked())
+        with mock.patch.object(w, "confirm_write", side_effect=AssertionError("não deveria pedir confirmação")):
+            self.assertTrue(w.send_message("crie o arquivo de missões", "codex", ""))
+        self.assertTrue(self.pump(lambda: self.store.tasks(pid)[0]["status"] not in ("queued", "running")))
+        t = self.store.tasks(pid)[0]
+        self.assertEqual(t["status"], "executed", t["result"])
+        self.assertTrue(t["checkpoint"])
+        self.assertTrue((self.project / "feito_pelo_codex.txt").exists())
+        w.go("queue")
+        w.queue.refresh()
+        w.queue.table.selectRow(0)
+        self.assertTrue(w.queue.b_undo.isEnabled())
+        w.queue.undo(confirm=False)
+        self.assertFalse((self.project / "feito_pelo_codex.txt").exists())
+        self.assertFalse(w.queue.b_undo.isEnabled())
+        # turning it off unlocks the manual toggles with their previous values
+        comp.t_auto.click()
+        self.assertFalse(self.store.autonomous(pid))
+        self.assertTrue(comp.t_write.isEnabled())
+        self.assertFalse(comp.t_write.isChecked())
+
+    def test_autonomy_requires_git(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        plain = Path(self.tmp.name) / "sem git"
+        plain.mkdir()
+        pid = self.store.add_project("Sem Git", plain)
+        w = self.window()
+        w.select_project(pid)
+        with mock.patch("kaguya.ui.main_window.QMessageBox.question", return_value=QMessageBox.No):
+            w.chat.composer.t_auto.click()
+        self.assertFalse(w.chat.composer.t_auto.isChecked())
+        self.assertFalse(self.store.autonomous(pid))

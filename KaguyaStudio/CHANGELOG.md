@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.5.0 — 25/11/2026
+
+### Novo
+- **Modo autônomo por projeto** (chave "Autônomo" em Permissões): a Kaguya (Codex) e a Claude editam arquivos,
+  rodam comandos, builds e testes e terminam a tarefa **sem pedir confirmação**. Explicado e confirmado uma vez
+  por projeto; fica lembrado ao reabrir o Studio; o cabeçalho mostra "Git ✓ • autônomo".
+  - **Ponto de restauração Git** antes de cada tarefa (sem mexer no seu stage, branch ou stash) e botão
+    **Desfazer** na Fila, que mostra os arquivos alterados e volta tudo como estava — inclusive se a IA fez commit.
+  - Codex: sandbox `workspace-write` com rede liberada para builds (Gradle baixa dependências).
+    Claude: edição e comandos liberados, com **push, remotes, configuração global, `gh`, instalações
+    (npm -g, pip, winget, choco, scoop) e comandos destrutivos do sistema bloqueados** pela própria CLI.
+  - Tarefas pedidas por voz no **Modo Live** passam a ser executadas direto quando o projeto está no modo autônomo.
+  - Exige repositório Git (é o que permite desfazer); sem Git o Studio oferece criar o repositório.
+
+### Corrigido
+- Temporizadores de inicialização (limites, GitHub, áudio) podiam disparar depois de a janela fechar.
+
 ## 4.4.0 — 25/11/2026
 
 ### Novo

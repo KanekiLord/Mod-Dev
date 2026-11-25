@@ -62,7 +62,7 @@ Commands: exec  login  app-server
 CODEX_EXEC_HELP = """Usage: codex exec [OPTIONS] [PROMPT]
 Commands: resume
   -s, --sandbox <SANDBOX_MODE> [possible values: read-only, workspace-write, danger-full-access]
-  -C, --cd <DIR>  -m, --model <MODEL>  --skip-git-repo-check  --json  -o, --output-last-message <FILE>
+  -c, --config <key=value>  -C, --cd <DIR>  -m, --model <MODEL>  --skip-git-repo-check  --json  -o, --output-last-message <FILE>
 """
 
 if name == "claude":
@@ -154,6 +154,8 @@ if name == "codex":
             print("Logged in using an API key - sk-proj-***ABCDE", file=sys.stderr); sys.exit(0)
         print("Logged in using ChatGPT", file=sys.stderr); sys.exit(0)
     rest = [a for a in args if a != "--search"]
+    while rest[:1] == ["-c"]:  # global config overrides, as in the real CLI
+        rest = rest[2:]
     if rest[:1] == ["exec"]:
         if "--skip-git-repo-check" not in rest and not in_git():
             print("Not inside a trusted directory and --skip-git-repo-check was not specified.", file=sys.stderr)

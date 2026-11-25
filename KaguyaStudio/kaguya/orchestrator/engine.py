@@ -18,6 +18,7 @@ from typing import Callable
 
 from ..appdirs import CATALOG, data_dir
 from ..cli import discovery
+from .. import checkpoint
 from ..cli.commands import RunOptions
 from ..cli.discovery import Capabilities, Diagnosis
 from ..cli.events import AgentEvent, RunResult
@@ -172,9 +173,12 @@ class Engine:
 
     # ----------------------------------------------------------------- queue
     def submit(self, pid: int, intent: Intent, *, write: bool = False, web: bool = True, commands: bool = False,
-               mcp: bool = False, run_tests: bool = False) -> int:
+               mcp: bool = False, run_tests: bool = False, autonomous: bool = False) -> int:
+        if autonomous:
+            # autonomous = everything needed to finish the task without asking (Git restore point first)
+            write = commands = run_tests = True
         tid = self.store.enqueue(pid, intent.target, intent.text, intent.kind, allow_write=write, allow_web=web,
-                                 allow_commands=commands, allow_mcp=mcp, run_tests=run_tests)
+                                 allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous)
         self.store.append_event(tid, "user", intent.text, "user")
         if intent.kind == "idea":
             ob = self.outbox(pid)
@@ -227,6 +231,8 @@ class Engine:
             self.emit("task_started", pid=pid, task_id=task["id"], target=task["target"], title=task["title"])
             status, summary = "error", ""
             try:
+                if task.get("autonomous") and task["allow_write"] and task["target"] != "paralelo":
+                    self._restore_point(pid, task)
                 if task["target"] == "equipe":
                     status, summary = self._run_team(pid, task, rt.cancel)
                 elif task["target"] == "paralelo":
@@ -250,6 +256,41 @@ class Engine:
                 self.emit("log", pid=pid, message="Fila pausada após falha; reative quando resolver o problema.")
                 break
         self.emit("worker_idle", pid=pid)
+
+    # ------------------------------------------------------------ autonomy
+    def _restore_point(self, pid: int, task: dict) -> None:
+        _proj, cwd, in_git, root = self._project(pid)
+        if not in_git:
+            raise TaskFailed("Modo autônomo exige repositório Git (é o que permite desfazer). Crie o repositório no menu GitHub.")
+        cp = checkpoint.create(Path(root), f"tarefa-{task['id']}")
+        self.store.set_checkpoint(task["id"], checkpoint.to_text(cp))
+        self.store.append_event(task["id"], "system", "Modo autônomo: ponto de restauração criado "
+                                f"({cp.commit[:10]}). Use \"Desfazer\" na fila para voltar tudo como estava.")
+
+    def task_changes(self, tid: int) -> list[str]:
+        task = self.store.get_task(tid)
+        cp = checkpoint.from_text(task.get("checkpoint") or "")
+        if cp is None:
+            return []
+        _p, _cwd, _git, root = self._project(task["project_id"])
+        return checkpoint.changes_since(Path(root), cp)
+
+    def undo_task(self, tid: int) -> list[str]:
+        """Return the project to the state before an autonomous task. Refuses while it runs."""
+        task = self.store.get_task(tid)
+        cp = checkpoint.from_text(task.get("checkpoint") or "")
+        if cp is None:
+            raise ValueError("Esta tarefa não tem ponto de restauração (só tarefas no modo autônomo têm).")
+        if self.current_task(task["project_id"]) == tid:
+            raise ValueError("A tarefa ainda está em execução; interrompa antes de desfazer.")
+        _p, _cwd, _git, root = self._project(task["project_id"])
+        changed = checkpoint.restore(Path(root), cp)
+        checkpoint.drop(Path(root), cp)
+        self.store.set_checkpoint(tid, "")
+        self.store.append_event(tid, "system", f"Desfeito: {len(changed)} arquivo(s) voltaram ao estado anterior à tarefa."
+                                + ("\n" + "\n".join(changed[:40]) if changed else ""))
+        self.emit("task_undone", pid=task["project_id"], task_id=tid, files=changed)
+        return changed
 
     # ---------------------------------------------------------------- helpers
     def _project(self, pid: int) -> tuple[dict, Path, bool, str | None]:
@@ -336,6 +377,7 @@ class Engine:
             except Exception:
                 agents = []
         return {"project": f"{proj['name']} ({proj['directory']})", "memory": self.memory_for(pid, task["title"]),
+                "autonomous": bool(task.get("autonomous")),
                 "agents": agents, "web": bool(task["allow_web"]), "max_subagents": int(self.setting("economy.max_subagents"))}
 
     # ----------------------------------------------------------------- modes
@@ -350,6 +392,7 @@ class Engine:
         prompt = task_prompt(task["title"], write=write, commands=bool(task["allow_commands"]), **common)
         resume = self.store.session(pid, agent) if self.setting("session.continue") else None
         opts = RunOptions(write=write, commands=bool(task["allow_commands"]), web=bool(task["allow_web"]),
+                          autonomous=bool(task.get("autonomous")),
                           mcp=bool(task["allow_mcp"]), resume=resume, in_git=in_git, workdir=str(cwd),
                           model=self.setting(f"models.{agent}") or None)
         self.store.set_stage(task["id"], "execucao")
@@ -383,6 +426,7 @@ class Engine:
         common = self._common(pid, task)
         max_cycles = max(1, min(5, int(self.setting("team.max_cycles"))))
         impl_opts = RunOptions(write=write, commands=commands, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
+                               autonomous=bool(task.get("autonomous")),
                                in_git=in_git, workdir=str(cwd), model=self.setting(f"models.{impl}") or None)
         rev_opts = RunOptions(write=False, commands=False, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                               in_git=in_git, workdir=str(cwd), model=self.setting("models.review") or None)
@@ -464,6 +508,7 @@ class Engine:
                     wcwd = wt / rel
                     # Writing is confined to the isolated worktree; the user's tree changes only on integration.
                     opts = RunOptions(write=True, commands=bool(task["allow_commands"]),
+                                      autonomous=bool(task.get("autonomous")),
                                       web=bool(task["allow_web"]), in_git=True, workdir=str(wcwd))
                     prompt = task_prompt(text, write=True, commands=bool(task["allow_commands"]),
                                          role=f"Trabalhador paralelo {i}. Você está num worktree Git isolado; altere só o "

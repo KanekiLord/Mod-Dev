@@ -19,7 +19,7 @@ import threading
 
 from .paths import normalize_user_path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 TASK_KINDS = ("execute", "later", "idea")
 TARGETS = ("codex", "claude", "equipe", "paralelo")
@@ -104,6 +104,11 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_tasks_queue ON tasks(project_id, kind, status, id);
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, id);
             """)
+            cols = {r[1] for r in db.execute("PRAGMA table_info(tasks)")}
+            if "autonomous" not in cols:
+                db.execute("ALTER TABLE tasks ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0")
+            if "checkpoint" not in cols:
+                db.execute("ALTER TABLE tasks ADD COLUMN checkpoint TEXT NOT NULL DEFAULT ''")
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema',?)", (str(SCHEMA_VERSION),))
 
     @contextmanager
@@ -217,16 +222,17 @@ class Store:
     # ------------------------------------------------------------------- tasks
     def enqueue(self, pid: int, target: str, title: str, kind: str = "execute", *,
                 allow_write: bool = False, allow_web: bool = True, allow_commands: bool = False,
-                allow_mcp: bool = False, run_tests: bool = False, parent_id: int | None = None) -> int:
+                allow_mcp: bool = False, run_tests: bool = False, parent_id: int | None = None,
+                autonomous: bool = False) -> int:
         if kind not in TASK_KINDS or target not in TARGETS:
             raise ValueError("Tipo ou destino não reconhecido")
         status = "queued" if kind == "execute" else "parked"
         with self.connection() as db:
             cur = db.execute(
                 "INSERT INTO tasks(project_id,parent_id,target,title,kind,status,created_at,allow_write,allow_web,"
-                "allow_commands,allow_mcp,run_tests) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "allow_commands,allow_mcp,run_tests,autonomous) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, parent_id, target, title, kind, status, now(), int(allow_write), int(allow_web),
-                 int(allow_commands), int(allow_mcp), int(run_tests)))
+                 int(allow_commands), int(allow_mcp), int(run_tests), int(autonomous)))
             return int(cur.lastrowid)
 
     def claim(self, pid: int) -> dict | None:
@@ -250,6 +256,17 @@ class Store:
     def set_stage(self, tid: int, stage: str) -> None:
         with self.connection() as db:
             db.execute("UPDATE tasks SET stage=? WHERE id=?", (stage, tid))
+
+    def set_checkpoint(self, tid: int, text: str) -> None:
+        with self.connection() as db:
+            db.execute("UPDATE tasks SET checkpoint=? WHERE id=?", (text, tid))
+
+    # autonomous mode is a per-project choice, remembered between sessions
+    def autonomous(self, pid: int) -> bool:
+        return bool(self.get_setting(f"project.{pid}.autonomous", False))
+
+    def set_autonomous(self, pid: int, on: bool) -> None:
+        self.set_setting(f"project.{pid}.autonomous", bool(on))
 
     def complete(self, tid: int, status: str, result: str = "") -> None:
         if status not in FINAL_STATES:
@@ -282,7 +299,7 @@ class Store:
 
     def activate_later(self, tid: int, **perms) -> bool:
         fields = {k: int(bool(v)) for k, v in perms.items()
-                  if k in ("allow_write", "allow_web", "allow_commands", "allow_mcp", "run_tests")}
+                  if k in ("allow_write", "allow_web", "allow_commands", "allow_mcp", "run_tests", "autonomous")}
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.connection() as db:
             cur = db.execute(

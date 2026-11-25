@@ -89,9 +89,11 @@ class QueuePage(QWidget):
         self.b_retry = button("Reenfileirar", "refresh", tip="Coloca de novo na fila uma tarefa interrompida/com erro")
         self.b_cancel = button("Cancelar", "x", "ghost")
         self.b_details = button("Detalhes e logs", "file")
+        self.b_undo = button("Desfazer", "refresh", "ghost", "Volta os arquivos do projeto ao estado de antes desta tarefa "
+                             "(ponto de restauração do modo autônomo)")
         self.b_todo = button("Copiar para todo.md", "book", "ghost", "Copia as tarefas guardadas no formato de checklist "
                              "(você cola no tasks/todo.md; o Studio não edita esse arquivo)")
-        for b in (self.b_run, self.b_retry, self.b_cancel, self.b_details, self.b_todo):
+        for b in (self.b_run, self.b_retry, self.b_cancel, self.b_details, self.b_undo, self.b_todo):
             bar.addWidget(b)
         bar.addStretch(1)
         refresh = button("", "refresh", "ghost", "Atualizar")
@@ -114,6 +116,7 @@ class QueuePage(QWidget):
         self.b_retry.clicked.connect(self.retry)
         self.b_cancel.clicked.connect(self.cancel)
         self.b_details.clicked.connect(self.details)
+        self.b_undo.clicked.connect(self.undo)
         self.b_todo.clicked.connect(self.copy_todo)
         self._sel()
 
@@ -133,6 +136,7 @@ class QueuePage(QWidget):
         self.b_retry.setEnabled(bool(t and t["status"] in ("interrupted", "error", "cancelled", "blocked_limit")))
         self.b_cancel.setEnabled(bool(t and t["status"] in ("queued", "parked")))
         self.b_details.setEnabled(bool(t))
+        self.b_undo.setEnabled(bool(t and t.get("checkpoint") and t["status"] != "running"))
         self._show_integration(t)
 
     def refresh(self):
@@ -163,11 +167,35 @@ class QueuePage(QWidget):
         if not t:
             return
         perms = self.win.chat.composer.permissions()
-        if perms["write"] and not self.win.confirm_write():
+        if perms["write"] and not perms["autonomous"] and not self.win.confirm_write():
             return
         self.win.store.activate_later(t["id"], allow_write=perms["write"], allow_web=perms["web"],
-                                      allow_commands=perms["commands"], allow_mcp=perms["mcp"], run_tests=perms["run_tests"])
+                                      allow_commands=perms["commands"], allow_mcp=perms["mcp"], run_tests=perms["run_tests"],
+                                      autonomous=perms["autonomous"])
         self.win.engine.start_worker(self.win.pid)
+        self.refresh()
+
+    def undo(self, *, confirm: bool = True):
+        t = self.selected()
+        if not t or not t.get("checkpoint"):
+            return
+        try:
+            files = self.win.engine.task_changes(t["id"])
+        except Exception as exc:
+            QMessageBox.warning(self, "Desfazer", str(exc))
+            return
+        lst = "\n".join(files[:25]) + (f"\n… e mais {len(files) - 25}" if len(files) > 25 else "")
+        if confirm and QMessageBox.question(
+                self, "Desfazer tarefa?", f"Voltar o projeto ao estado de antes da tarefa #{t['id']}?\n\n"
+                + (f"{len(files)} arquivo(s) mudaram desde então (inclui mudanças suas feitas depois):\n{lst}"
+                   if files else "Nenhum arquivo mudou desde o ponto de restauração.")) != QMessageBox.Yes:
+            return
+        try:
+            changed = self.win.engine.undo_task(t["id"])
+        except Exception as exc:
+            QMessageBox.warning(self, "Desfazer", str(exc))
+            return
+        self.win.toast(f"Tarefa #{t['id']} desfeita: {len(changed)} arquivo(s) restaurado(s).")
         self.refresh()
 
     def retry(self):
