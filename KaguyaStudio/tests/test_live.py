@@ -78,9 +78,13 @@ class SessionBase(unittest.TestCase):
         self.busy = False
         self.texts = ["implemente o HUD de chakra", "e o que mais?"]
 
+        self.convs = []
+        # order matters on Windows: stop the session first, then close its processes, then delete the folder
+        self.addCleanup(lambda: [c.close() for c in self.convs])
+
         def make(agent):
             c = ClaudeConversation(self.exe["claude"], Path(self.tmp.name), env=self.env, on_rate_limit=self.limits.append)
-            self.addCleanup(c.close)
+            self.convs.append(c)
             return c
         self.s = LiveSession(agent="claude", make_conversation=make, transcribe=lambda a: self.texts.pop(0),
                              say=lambda text, agent: self.said.append((agent, text)) or True,

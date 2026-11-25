@@ -69,7 +69,7 @@ class Proposals(Base):
         self.assertEqual((d["kind"], d["relative"], d["stale"]), ("atualizacao", "conhecimento/registro-forge.md", False))
         self.assertIn("+Em 1.20.1 o RegisterEvent", d["diff"])
         done = self.ob.approve([p.name])
-        self.assertEqual(done, [self.note])
+        self.assertEqual([d.resolve() for d in done], [self.note.resolve()])   # Windows: RUNNER~1 vs runneradmin
         after = self.note.read_text(encoding="utf-8")
         self.assertTrue(after.startswith(before.rstrip("\n")))                  # nothing removed or rewritten
         self.assertIn("## Atualização", after)
