@@ -1,5 +1,31 @@
 # Changelog
 
+## 5.3.0 — 25/11/2026 (pacote "Vozes naturais", etapa 3: motor pesado)
+
+### Novo
+- **Qwen3-TTS 0.6B CustomVoice** como motor opcional, **instalado só se você confirmar** na página Vozes. Antes de
+  baixar, o Studio mostra modelo, origem (Hugging Face/Qwen, PyPI, download.pytorch.org, uv do GitHub com checksum
+  conferido), licença (Apache-2.0), tamanho (≈ 4 GB) e a pasta de destino. Tudo fica em
+  `<dados>/vozes/qwen3/` (Python 3.12 e PyTorch **para CPU** isolados — o Studio nunca carrega PyTorch); **Cancelar**
+  interrompe na hora, mesmo no meio de um download; **Remover** apaga tudo e devolve os perfis ao automático.
+- O motor só aparece como instalado depois de **carregar o modelo de verdade e responder** (não por existir a pasta).
+- 9 vozes do modelo selecionáveis por personagem, estilos viram instrução de fala ("com energia e alegria"…); entra no
+  benchmark e no teste cego A/B. O modo Automático **nunca** escolhe o Qwen (lento demais para o Live) — só se você pedir.
+- Processo de voz separado, com canal protegido: o que as bibliotecas imprimem não quebra a comunicação (bug real
+  encontrado no teste e corrigido).
+- Amostras `qwen3_serena.wav` e `qwen3_vivian.wav` em `docs/amostras_voz/` para comparar com o Kokoro.
+
+### Medido de verdade (nuvem, 4 vCPU, sem GPU)
+- Carga do modelo: **8,8 s** (com os arquivos já baixados). 7 frases: **RTF 3,75–4,13** (≈ 3× mais lento que o Kokoro
+  aqui, RTF 1,25). Português reconhecido pelo Whisper em todas as vozes femininas (99–100%), mas **com sotaque**: as
+  vozes do modelo são nativas de chinês/inglês/japonês/coreano.
+- Conclusão honesta: com a GT 1030 (2 GB, sem suporte útil) roda na CPU; serve para ouvir e comparar, **não** para
+  conversa em tempo real. O Kokoro continua o padrão.
+
+### Avaliado e adiado
+- **Chatterbox Multilingual (pt-BR)**: projeto arquivado desde 08/2026 e carregador próprio para o checkpoint pt-BR;
+  não instalado nem oferecido nesta versão.
+
 ## 5.2.0 — 25/11/2026 (pacote "Vozes naturais", etapas 1, 2 e 4)
 
 ### Novo

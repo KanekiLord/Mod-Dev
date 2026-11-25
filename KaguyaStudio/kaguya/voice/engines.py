@@ -2,8 +2,9 @@
 
 * ``kokoro``  — Kokoro-82M ONNX (Apache-2.0), local, pt-BR ``pf_dora`` mixes. Installed by the Studio on request.
 * ``windows`` — the voices installed in Windows (SAPI), local.
-* ``qwen3`` / ``chatterbox`` — heavier neural engines listed with their real status. They need PyTorch and
-  several GB in an isolated environment, so they are **never installed automatically**: the user must authorise it.
+* ``qwen3`` — Qwen3-TTS CustomVoice in an isolated Python environment with PyTorch (``heavy.py``). Several GB, so it is
+  **never installed automatically**: the Vozes page asks for confirmation (size, licence, origin) first.
+* ``chatterbox`` — evaluated and listed with its real status (archived project), not installable in this version.
 
 Per-character voice profiles (engine, voice, style, speed, volume) are stored separately from the personality text.
 """
@@ -122,29 +123,78 @@ class WindowsEngine:
         return sapi_synth(lambda _a: name)(text, agent)
 
 
+class QwenEngine:
+    """Qwen3-TTS CustomVoice through the isolated worker (``voice/heavy.py``). Installed only by the user."""
+    id = "qwen3"
+
+    def __init__(self, home):
+        self.home = home
+        self._client = None
+
+    def info(self) -> dict:
+        from .heavy import status
+        return status(self.home, self.id) if self.home else {}
+
+    def probe(self) -> Capabilities:
+        from .heavy import SPECS
+        spec, info = SPECS[self.id], self.info()
+        speakers = info.get("speakers") or []
+        return Capabilities(
+            id=self.id, name=spec.name, installed=bool(info), license=spec.license, size=spec.approx,
+            languages=tuple(info.get("languages") or ("Portuguese",)), emotion_control=True,
+            voices=[(v, v.replace("_", " ").title()) for v in speakers], streaming="por frase (o modelo inteiro é gerado por frase)",
+            status=(f"pronto ({len(speakers)} vozes, {info.get('device') or 'cpu'}; instalado {info.get('installed_at', '')})"
+                    if info else "não instalado — botão Instalar abaixo (pede confirmação, mostra tamanho e licença)"),
+            notes=spec.notes)
+
+    def synth(self, text: str, profile: VoiceProfile, agent: str):
+        from .heavy import SPECS, WorkerClient
+        info = self.info()
+        if not info:
+            raise RuntimeError("Qwen3-TTS não está instalado")
+        if self._client is None:
+            self._client = WorkerClient(self.home, self.id, info.get("model") or SPECS[self.id].model)
+        speakers = info.get("speakers") or []
+        voice = profile.voice if profile.voice in speakers else QWEN_DEFAULT.get(agent, speakers[0] if speakers else "")
+        if voice not in speakers and speakers:
+            voice = speakers[0]
+        instruct = QWEN_STYLE.get(profile.style, "")
+        return self._client.synth(text, speaker=voice, language="Portuguese", instruct=instruct)
+
+    def close(self):
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
+# female preset voices of the model (per Qwen's model card); not chosen by ear — change them in the Vozes page
+QWEN_DEFAULT = {"codex": "serena", "claude": "vivian"}
+QWEN_STYLE = {"natural": "", "suave": "Fale de forma calma e suave.", "animado": "Fale com energia e alegria.",
+              "formal": "Fale de forma clara e profissional."}
+
 HEAVY = {
-    "qwen3": Capabilities(
-        id="qwen3", name="Qwen3-TTS 0.6B (Base / CustomVoice)", installed=False, license="Apache-2.0",
-        size="PyTorch + modelo: vários GB", cloning=True, streaming="declarado pelo projeto (a medir)",
-        status="não instalado — precisa da sua autorização (ambiente Python 3.12 isolado, PyTorch, download do modelo)",
-        notes="Português listado oficialmente; sotaque BR a avaliar de ouvido. Clonagem só com referência sua e "
-              "consentimento. Base e CustomVoice são modelos diferentes. Desempenho na sua GPU/CPU a medir."),
     "chatterbox": Capabilities(
         id="chatterbox", name="Chatterbox Multilingual V3 (pt-BR)", installed=False, license="MIT",
         size="PyTorch + checkpoint pt-BR: vários GB", cloning=True, emotion_control=True,
-        status="não instalado — precisa da sua autorização; projeto arquivado (sem manutenção desde 08/2026)",
-        notes="Checkpoint pt-BR tem carregador e arquivos próprios (verificar antes). Expressivo, mas sem manutenção."),
+        status="não disponível nesta versão — projeto arquivado (sem manutenção desde 08/2026); avaliado e adiado",
+        notes="Checkpoint pt-BR tem carregador e arquivos próprios. Expressivo, mas sem manutenção: não vale o risco agora."),
 }
 
 
 class VoiceEngines:
     """Registry + 'auto' choice. Only one engine synthesises at a time (the speech queue has one worker)."""
 
-    def __init__(self, neural, windows_name_getter=None):
-        self.engines = {"kokoro": KokoroEngine(neural), "windows": WindowsEngine(windows_name_getter)}
+    def __init__(self, neural, windows_name_getter=None, home=None):
+        self.engines = {"kokoro": KokoroEngine(neural), "windows": WindowsEngine(windows_name_getter),
+                        "qwen3": QwenEngine(home)}
 
     def capabilities(self) -> list[Capabilities]:
         return [e.probe() for e in self.engines.values()] + list(HEAVY.values())
+
+    def close(self):
+        for e in self.engines.values():
+            if hasattr(e, "close"):
+                e.close()
 
     def resolve(self, profile: VoiceProfile):
         if profile.engine in self.engines and self.engines[profile.engine].probe().installed:

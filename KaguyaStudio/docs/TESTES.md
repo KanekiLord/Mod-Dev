@@ -27,6 +27,20 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Vozes naturais — 5.3.0 (Qwen3-TTS opcional)
+
+- `test_voices.py › HeavyInstall` (uv falso + modo de teste do processo de voz, sem download): instalação completa →
+  marca só depois de carregar e responder; PyTorch pedido do índice **CPU**; o motor fala, mantém o processo entre
+  frases, relata erro e continua vivo; Remover apaga tudo; passo que falha não deixa marca; **cancelar no meio de um
+  passo silencioso (download longo) para em < 10 s**; checksum errado do uv → nada instalado; sem processos ou
+  arquivos abertos sobrando (rodado com `-W error::ResourceWarning`).
+- `test_ui_v4.py › VoicesUi`: recusar a confirmação não cria nada; a mensagem mostra licença, tamanho, origem, pasta,
+  CPU e que dá para cancelar.
+- **Real (nuvem 4 vCPU)**: `qwen-tts 0.1.1` + `torch 2.15.0+cpu` num ambiente isolado; o mesmo `WorkerClient` do Studio
+  carregou o modelo em 8,8 s e sintetizou 7 frases pt-BR com RTF 3,75–4,13; Whisper reconheceu português (0,99–1,0)
+  nas vozes serena, vivian, ono_anna e sohee. Bug encontrado: a biblioteca imprime no stdout → canal protegido.
+- **Não feito**: instalação real no Windows (≈ 4 GB — fica para você, pelo botão); avaliação auditiva sua.
+
 ## Vozes naturais — 5.2.0
 
 - `test_voices.py`: números e frases do benchmark do pacote falados corretamente; motores pesados nunca aparecem
@@ -38,7 +52,7 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   salvo sem mexer na Kaguya.
 - **Real (Kokoro-82M ONNX, 12 frases pt-BR do pacote, CPU de 4 núcleos sem GPU)**: Kaguya RTF p50 1,249, TTFA p50
   3,31 s / p95 6,05 s; Miwa (Animado 1,05×) RTF p50 1,271, TTFA p50 2,82 s / p95 5,43 s; 0 erros.
-- **Não feito**: Qwen3-TTS e Chatterbox (aguardando sua autorização para instalar); avaliação auditiva sua (A/B no app);
+- **Não feito (na 5.2)**: Qwen3-TTS (feito na 5.3) e Chatterbox (adiado: arquivado); avaliação auditiva sua;
   medição no seu PC/GPU.
 
 ## Etapa B — 5.1.0 (Kaguya Music)

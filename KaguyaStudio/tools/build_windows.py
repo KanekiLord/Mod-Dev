@@ -39,6 +39,8 @@ def main() -> int:
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", "KaguyaStudio",
            "--icon", str(ROOT / "assets" / "branding" / "kaguya.ico"),
            "--add-data", f"assets{SEP}assets", "--add-data", f"catalogo{SEP}catalogo",
+           # run from disk by the isolated Python of heavy voice engines (never imported by the Studio)
+           "--add-data", f"kaguya/voice/workers/tts_worker.py{SEP}kaguya/voice/workers",
            "--collect-submodules", "kaguya",
            *voice_args(),
            "--exclude-module", "tkinter", "--exclude-module", "PySide6.Qt3DCore", "--exclude-module", "PySide6.QtQuick",
@@ -46,6 +48,9 @@ def main() -> int:
     print(" ".join(cmd))
     subprocess.run(cmd, check=True)
     out = ROOT / "dist" / "KaguyaStudio"
+    worker = out / "_internal" / "kaguya" / "voice" / "workers" / "tts_worker.py"
+    if not worker.exists():
+        raise SystemExit(f"tts_worker.py ausente no pacote: {worker}")
     for f in ("README.md", "CHANGELOG.md", "INICIAR_KAGUYA_STUDIO.bat", "INICIAR_SOMENTE_MASCOTES.bat"):
         if (ROOT / f).exists():
             shutil.copy2(ROOT / f, out / f)

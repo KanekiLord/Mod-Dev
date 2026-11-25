@@ -22,7 +22,7 @@ class VoiceController(QObject):
         from ..voice.neural import NeuralVoices
         from ..voice.engines import VoiceEngines
         self.neural = NeuralVoices(self.win.engine.home / "modelos")
-        self.engines = VoiceEngines(self.neural, self._windows_voice)
+        self.engines = VoiceEngines(self.neural, self._windows_voice, self.win.engine.home)
         self.queue = None   # SpeechQueue, created lazily (needs numpy/sounddevice)
 
     # ------------------------------------------------------------------ devices
@@ -251,6 +251,10 @@ class VoiceController(QObject):
 
     def shutdown(self):
         self.stop_speaking()
+        try:
+            self.engines.close()   # ends the Qwen worker process, if one was started
+        except Exception:
+            pass
         if self.recorder:
             try:
                 self.recorder.stop()

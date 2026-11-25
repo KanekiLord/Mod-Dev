@@ -616,7 +616,7 @@ class VoicesUi(UiBase):
         names = [page.engines_table.item(r, 0).text() for r in range(page.engines_table.rowCount())]
         self.assertTrue(any("Qwen3" in n for n in names) and any("Chatterbox" in n for n in names))
         qrow = names.index(next(n for n in names if "Qwen3" in n))
-        self.assertIn("autorização", page.engines_table.item(qrow, 1).text())
+        self.assertIn("confirmação", page.engines_table.item(qrow, 1).text())
         miwa = page.editors["claude"]
         heavy = miwa.engine.findData("qwen3")
         self.assertFalse(miwa.engine.model().item(heavy).isEnabled())       # cannot be picked before installing
@@ -625,6 +625,20 @@ class VoicesUi(UiBase):
         p = load_profile(self.store, "claude")
         self.assertEqual((p.style, p.volume), ("animado", 55))
         self.assertEqual(load_profile(self.store, "codex").style, "natural")   # Kaguya untouched
+
+    def test_qwen_install_needs_confirmation_and_shows_what_it_downloads(self):
+        from kaguya.voice.heavy import engine_dir
+        w = self.window()
+        w.go("voices")
+        page = w.voices_page
+        self.assertFalse(page.qwen_install.isHidden())
+        self.assertTrue(page.qwen_remove.isHidden())
+        seen = []
+        self.assertFalse(page.install_qwen(confirm=lambda m: seen.append(m) or False))   # user says no
+        for word in ("Apache-2.0", "4 GB", "Hugging Face", str(engine_dir(w.engine.home, "qwen3")), "CPU", "cancelar"):
+            self.assertIn(word, seen[0])
+        self.assertFalse(engine_dir(w.engine.home, "qwen3").exists())         # nothing downloaded or created
+        self.assertIsNone(page._installer)
 
 
 def tearDownModule():

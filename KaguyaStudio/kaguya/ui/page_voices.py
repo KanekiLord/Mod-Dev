@@ -6,12 +6,12 @@ import random
 import threading
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QFormLayout, QGridLayout, QHBoxLayout, QSlider, QTextBrowser, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QComboBox, QFormLayout, QGridLayout, QHBoxLayout, QMessageBox, QSlider, QTextBrowser,
+                               QVBoxLayout, QWidget)
 
 from ..appdirs import ASSETS
 from ..voice.engines import HEAVY, STYLES, VoiceProfile, benchmark, load_profile, save_profile
-from .common import run_bg
+from .common import _deliver, run_bg
 from .page_work import item, page_title, scroll, table
 from .theme import AGENT, C
 from .widgets import Card, button, label
@@ -121,8 +121,12 @@ class ProfileEditor(Card):
 
     def _show_used(self):
         engine = self.win.voice.engines.resolve(self.current())
-        self.used.setText(f"Em uso agora: {self.caps[engine.id].name}" if engine and engine.id in self.caps else
-                          "Nenhum motor de voz disponível nesta cópia.")
+        text = (f"Em uso agora: {self.caps[engine.id].name}" if engine and engine.id in self.caps else
+                "Nenhum motor de voz disponível nesta cópia.")
+        if engine is not None and engine.id == "qwen3":
+            text += (" — lento na CPU (medido ≈ 4× o tempo real): as falas demoram a começar; "
+                     "para o Live, prefira o Kokoro.")
+        self.used.setText(text)
 
     def hear(self):
         name = AGENT[self.agent]["mascot"]
@@ -146,9 +150,27 @@ class VoicesPage(QWidget):
         self.engines_table = table(["Motor", "Situação", "Licença", "Tamanho", "Clonagem", "Fala"], stretch=1)
         self.engines_table.setMinimumHeight(150)
         ec.lay.addWidget(self.engines_table)
-        ec.lay.addWidget(label("Qwen3-TTS e Chatterbox precisam de PyTorch e vários GB num ambiente isolado: nada é "
-                               "baixado sem a sua autorização. Clonagem de voz só com gravação sua ou de quem autorizou.",
+        ec.lay.addWidget(label("Qwen3-TTS precisa de PyTorch e ≈ 4 GB num ambiente isolado na pasta de dados do Studio: "
+                               "nada é baixado sem a sua confirmação, e Remover apaga tudo. Clonagem de voz não é usada.",
                                "dim", wrap=True))
+        irow = QHBoxLayout()
+        self.qwen_install = button("Instalar Qwen3-TTS…", "download", "primary",
+                                   "Mostra tamanho, origem e licença e pede confirmação antes de baixar")
+        self.qwen_cancel = button("Cancelar", "stop", "ghost")
+        self.qwen_remove = button("Remover Qwen3-TTS", "trash", "ghost", "Apaga o ambiente e o modelo do disco")
+        self.qwen_install.clicked.connect(self.install_qwen)
+        self.qwen_cancel.clicked.connect(self.cancel_install)
+        self.qwen_remove.clicked.connect(self.remove_qwen)
+        self.qwen_cancel.hide()
+        for b in (self.qwen_install, self.qwen_cancel, self.qwen_remove):
+            irow.addWidget(b)
+        irow.addStretch(1)
+        ec.lay.addLayout(irow)
+        self.install_log = QTextBrowser()
+        self.install_log.setFixedHeight(130)
+        self.install_log.hide()
+        ec.lay.addWidget(self.install_log)
+        self._installer = None
         lay.addWidget(ec)
         # profiles
         grid = QGridLayout()
@@ -237,6 +259,12 @@ class VoicesPage(QWidget):
             e.load(caps)
         options = [("kokoro|" + v, f"Kokoro · {t}") for c in caps if c.id == "kokoro" and c.installed for v, t in c.voices]
         options += [("windows|" + v, f"Windows · {t}") for c in caps if c.id == "windows" and c.installed for v, t in c.voices]
+        options += [("qwen3|" + v, f"Qwen3 · {t}") for c in caps if c.id == "qwen3" and c.installed for v, t in c.voices]
+        qwen = next((c for c in caps if c.id == "qwen3"), None)
+        busy = self._installer is not None
+        self.qwen_install.setVisible(bool(qwen) and not qwen.installed and not busy)
+        self.qwen_remove.setVisible(bool(qwen) and qwen.installed and not busy)
+        self.qwen_cancel.setVisible(busy)
         for box, pick in ((self.ab_a, 0), (self.ab_b, 1)):
             box.clear()
             for key, text in options:
@@ -249,6 +277,64 @@ class VoicesPage(QWidget):
         last = self.win.store.get_setting("voice.benchmark.last", None)
         if last:
             self._show_bench(last)
+
+    # ------------------------------------------------------------- heavy engine install (always confirmed)
+    def install_qwen(self, confirm=None):
+        from ..voice.heavy import SPECS, engine_dir
+        spec = SPECS["qwen3"]
+        dest = engine_dir(self.win.engine.home, "qwen3")
+        msg = (f"Instalar {spec.name}?\n\n"
+               f"Modelo: {spec.model} (Hugging Face, Qwen/Alibaba)\n"
+               f"Licença: {spec.license}\n"
+               f"Tamanho: {spec.approx}\n"
+               f"Origem: uv {__import__('kaguya.voice.heavy', fromlist=['x']).UV_VERSION} (GitHub astral-sh, checksum "
+               f"conferido), Python 3.12, PyTorch para CPU (download.pytorch.org), qwen-tts 0.1.1 (PyPI)\n"
+               f"Destino: {dest}\n\n"
+               f"{spec.notes}\n\nNada é enviado a terceiros; nenhuma chave ou conta é usada. "
+               "Pode cancelar a qualquer momento, e Remover apaga tudo.")
+        ok = confirm(msg) if confirm else QMessageBox.question(self, "Instalar voz Qwen3-TTS", msg) == QMessageBox.Yes
+        if not ok:
+            return False
+        from ..voice.heavy import Installer
+        self.install_log.clear()
+        self.install_log.show()
+        log = lambda line: _deliver(lambda: self.install_log.append(line))
+        self._installer = Installer(self.win.engine.home, "qwen3", log=log)
+        self.refresh()
+
+        def done(_info):
+            self._installer = None
+            self.install_log.append("Instalado e testado: o Qwen3-TTS já aparece em Motor e no teste cego.")
+            self.win.toast("Qwen3-TTS instalado.")
+            self.refresh()
+
+        def fail(exc, _tb):
+            self._installer = None
+            self.install_log.append(f"Não instalado: {exc}")
+            self.refresh()
+        run_bg(self._installer.install, done, fail)
+        return True
+
+    def cancel_install(self):
+        if self._installer is not None:
+            self._installer.cancel.set()
+            self.install_log.append("Cancelando…")
+
+    def remove_qwen(self, confirm=None):
+        from ..voice.heavy import Installer
+        msg = "Remover o Qwen3-TTS? Apaga o ambiente Python e o modelo (≈ 4 GB). As vozes Kokoro e do Windows continuam."
+        ok = confirm(msg) if confirm else QMessageBox.question(self, "Remover Qwen3-TTS", msg) == QMessageBox.Yes
+        if not ok:
+            return False
+        self.win.voice.engines.close()
+        Installer(self.win.engine.home, "qwen3").uninstall()
+        for a in ("codex", "claude"):   # profiles that pointed to it fall back to automatic
+            p = load_profile(self.win.store, a)
+            if p.engine == "qwen3":
+                p.engine, p.voice = "auto", ""
+                save_profile(self.win.store, a, p)
+        self.refresh()
+        return True
 
     # ------------------------------------------------------------- benchmark
     def run_benchmark(self):

@@ -69,8 +69,13 @@ class EnginesAndProfiles(unittest.TestCase):
     def test_heavy_engines_never_claim_to_be_installed(self):
         for cap in HEAVY.values():
             self.assertFalse(cap.installed)
-            self.assertIn("autorização", cap.status)
         self.assertIn("arquivado", HEAVY["chatterbox"].status)
+        from kaguya.voice.engines import QwenEngine
+        qwen = QwenEngine(Path(self.tmp.name)).probe()
+        self.assertFalse(qwen.installed)                      # nothing installed until the user confirms
+        self.assertIn("confirmação", qwen.status)
+        with self.assertRaises(RuntimeError):
+            QwenEngine(Path(self.tmp.name)).synth("oi", VoiceProfile(engine="qwen3"), "codex")
 
     def test_profiles_are_independent_and_migrate(self):
         self.store.set_setting("voice.neural_claude", "suave")        # chosen in 4.x
@@ -148,3 +153,118 @@ class QueueBehaviour(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeavyInstall(unittest.TestCase):
+    """Installer + worker client, end to end with a fake uv and the worker's test double (no download)."""
+
+    def setUp(self):
+        import os
+        import stat
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name) / "dados"
+        bindir = Path(self.tmp.name) / "bin"
+        bindir.mkdir()
+        self.calls = Path(self.tmp.name) / "uv_calls.txt"
+        uv = bindir / "uv"
+        uv.write_text(f"""#!{sys.executable}
+import os, sys
+from pathlib import Path
+open({str(self.calls)!r}, "a").write(" ".join(sys.argv[1:]) + "\\n")
+if sys.argv[1] == "venv":
+    b = Path(sys.argv[2]) / "bin"; b.mkdir(parents=True, exist_ok=True)
+    (b / "python").symlink_to({sys.executable!r})
+    print("criado")
+elif sys.argv[1] == "pip":
+    print("instalando " + sys.argv[-1])
+    if os.environ.get("FAKE_UV_FAIL"): sys.exit(3)
+    if os.environ.get("FAKE_UV_SLEEP"):
+        import time; time.sleep(float(os.environ["FAKE_UV_SLEEP"]))
+""")
+        uv.chmod(uv.stat().st_mode | stat.S_IEXEC)
+        for p in (mock.patch.dict(os.environ, {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+                                                "KAGUYA_TTS_WORKER_FAKE": "1"}),
+                  mock.patch("sys.platform", "linux")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_install_writes_marker_only_after_real_load_and_engine_speaks(self):
+        from kaguya.voice import heavy
+        from kaguya.voice.engines import QwenEngine
+        lines = []
+        info = heavy.Installer(self.home, "qwen3", log=lines.append).install()
+        self.assertEqual(info["speakers"], ["serena", "vivian"])
+        calls = self.calls.read_text()
+        self.assertIn("venv", calls)
+        self.assertIn("--index-url https://download.pytorch.org/whl/cpu", calls)   # CPU build, never CUDA
+        self.assertIn("qwen-tts==0.1.1", calls)
+        self.assertEqual(heavy.status(self.home, "qwen3")["model"], heavy.SPECS["qwen3"].model)
+        eng = QwenEngine(self.home)
+        cap = eng.probe()
+        self.assertTrue(cap.installed)
+        self.assertIn(("vivian", "Vivian"), cap.voices)
+        try:
+            audio, sr = eng.synth("Olá, Miwa aqui.", VoiceProfile(engine="qwen3", style="animado"), "claude")
+            self.assertEqual(sr, 24000)
+            self.assertGreater(len(audio), 2400)
+            self.assertLessEqual(float(np.abs(audio).max()), 0.51)
+            audio2, _ = eng.synth("Mais uma frase, mesmo processo.", VoiceProfile(engine="qwen3"), "codex")
+            self.assertGreater(len(audio2), len(audio))
+            with self.assertRaises(RuntimeError):            # worker errors are surfaced, process survives
+                eng.synth("por favor falhe", VoiceProfile(engine="qwen3"), "codex")
+            eng.synth("ainda vivo", VoiceProfile(engine="qwen3"), "codex")
+        finally:
+            eng.close()
+        heavy.Installer(self.home, "qwen3").uninstall()
+        self.assertFalse(heavy.engine_dir(self.home, "qwen3").exists())
+        self.assertFalse(QwenEngine(self.home).probe().installed)
+
+    def test_failed_step_leaves_no_marker(self):
+        import os
+        from unittest import mock
+        from kaguya.voice import heavy
+        with mock.patch.dict(os.environ, {"FAKE_UV_FAIL": "1"}):
+            with self.assertRaises(RuntimeError):
+                heavy.Installer(self.home, "qwen3", log=lambda _l: None).install()
+        self.assertEqual(heavy.status(self.home, "qwen3"), {})
+
+    def test_cancel_stops_install(self):
+        from kaguya.voice import heavy
+        inst = heavy.Installer(self.home, "qwen3", log=lambda _l: None)
+        inst.cancel.set()
+        with self.assertRaises(RuntimeError):
+            inst.install()
+        self.assertEqual(heavy.status(self.home, "qwen3"), {})
+
+    def test_cancel_during_a_silent_download_is_immediate(self):
+        import os
+        from unittest import mock
+        from kaguya.voice import heavy
+        inst = heavy.Installer(self.home, "qwen3", log=lambda _l: None)
+        threading.Timer(0.5, inst.cancel.set).start()
+        t0 = time.monotonic()
+        with mock.patch.dict(os.environ, {"FAKE_UV_SLEEP": "60"}):
+            with self.assertRaises(RuntimeError) as ctx:
+                inst.install()
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertIn("cancelada", str(ctx.exception))
+        self.assertEqual(heavy.status(self.home, "qwen3"), {})
+
+    def test_uv_checksum_mismatch_installs_nothing(self):
+        import io as _io
+        import zipfile as _zip
+        from unittest import mock
+        from kaguya.voice import heavy
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w") as z:
+            z.writestr("uv.exe", b"MZ adulterado")
+        with mock.patch.object(heavy.shutil, "which", return_value=None), \
+                mock.patch.dict(heavy.UV_ASSETS, {"linux": ("uv.zip", "0" * 64)}), \
+                mock.patch.object(heavy.urllib.request, "urlopen",
+                                  return_value=mock.Mock(read=lambda: buf.getvalue())):
+            with self.assertRaises(RuntimeError) as ctx:
+                heavy.Installer(self.home, "qwen3", log=lambda _l: None).uv()
+        self.assertIn("checksum", str(ctx.exception))
+        self.assertFalse((heavy.engine_dir(self.home, "qwen3") / "uv").exists())
