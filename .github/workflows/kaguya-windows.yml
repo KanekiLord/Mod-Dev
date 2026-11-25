@@ -26,7 +26,7 @@ jobs:
           node-version: "22"
 
       - name: Dependências do Studio
-        run: python -m pip install -r requirements.txt pyinstaller pillow
+        run: python -m pip install -r requirements.txt -r requirements-voz.txt pyinstaller pillow
 
       - name: CLIs oficiais (instaladas sem login, sem chaves)
         run: npm install -g @openai/codex @anthropic-ai/claude-code
@@ -61,6 +61,14 @@ jobs:
           $env:KAGUYA_HOME = "$env:RUNNER_TEMP\kaguya-exe"
           $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--captura","capturas\win_exe_diag.png","--pagina","diag" -PassThru -Wait
           if (-not (Test-Path capturas\win_exe_diag.png)) { throw "executável não gerou a captura (código $($p.ExitCode))" }
+
+      - name: Voz local dentro do executável (importa faster-whisper e o acesso ao microfone)
+        shell: pwsh
+        run: |
+          $env:KAGUYA_HOME = "$env:RUNNER_TEMP\kaguya-voz"
+          $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--verificar-voz" -PassThru -Wait
+          Get-Content "$env:KAGUYA_HOME\logs\voz.txt"
+          if ($p.ExitCode -ne 0) { throw "voz indisponível no executável (código $($p.ExitCode))" }
 
       - name: Executável em modo normal (como o usuário abre), com dados da V3 para importar
         shell: pwsh

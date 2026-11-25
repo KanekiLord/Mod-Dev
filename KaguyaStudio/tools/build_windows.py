@@ -19,12 +19,28 @@ from kaguya import VERSION  # noqa: E402
 SEP = ";" if os.name == "nt" else ":"
 
 
+def voice_args() -> list[str]:
+    """Bundle local voice (faster-whisper + microphone) when installed in the build environment."""
+    import importlib.util
+    args = []
+    for mod in ("faster_whisper", "ctranslate2", "sounddevice", "_sounddevice_data", "av", "tokenizers",
+                "onnxruntime", "huggingface_hub"):
+        if importlib.util.find_spec(mod) is not None:
+            args += ["--collect-all", mod]
+    if args:
+        print("Voz local incluída:", " ".join(a for a in args if a != "--collect-all"))
+    else:
+        print("AVISO: dependências de voz ausentes; o executável sairá sem transcrição local.")
+    return args
+
+
 def main() -> int:
     os.chdir(ROOT)
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", "KaguyaStudio",
            "--icon", str(ROOT / "assets" / "branding" / "kaguya.ico"),
            "--add-data", f"assets{SEP}assets", "--add-data", f"catalogo{SEP}catalogo",
            "--collect-submodules", "kaguya",
+           *voice_args(),
            "--exclude-module", "tkinter", "--exclude-module", "PySide6.QtWebEngineCore",
            "--exclude-module", "PySide6.Qt3DCore", "--exclude-module", "PySide6.QtQuick",
            "run_kaguya.py"]

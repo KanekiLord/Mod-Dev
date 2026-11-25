@@ -61,8 +61,12 @@ class VoiceController(QObject):
             st = stt.status(self.win.engine.home / "modelos", self.win.store.get_setting("voice.model", "small"))
             if not st.ready:
                 btn.setChecked(False)
-                QMessageBox.information(self.win, "Voz", "A transcrição local ainda não está instalada.\n\nFaltam: "
-                                        + ", ".join(st.missing) + f"\n\nInstale com o INSTALAR.bat (opção de voz) ou:\n{stt.INSTALL_CMD}"
+                import sys as _sys
+                how = ("Esta cópia do executável foi gerada sem a voz local. Baixe a versão mais recente do "
+                       "KaguyaStudio (ela já inclui a transcrição)." if getattr(_sys, "frozen", False) else
+                       f"Instale com o INSTALAR.bat (opção de voz) ou:\n{stt.INSTALL_CMD}")
+                QMessageBox.information(self.win, "Voz", "A transcrição local não está disponível.\n\nFaltam: "
+                                        + ", ".join(st.missing) + "\n\n" + how +
                                         "\n\nNada é enviado para APIs pagas: tudo roda no seu computador.")
                 return
             if not st.model_cached and not self.win.store.get_setting("voice.model_consent", False):

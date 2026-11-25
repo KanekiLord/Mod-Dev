@@ -26,6 +26,8 @@ def _args(argv):
     ap.add_argument("--escala", type=float)
     ap.add_argument("--tamanho", default="1480x920")
     ap.add_argument("--flutuantes", action="store_true", help="em --captura, também captura as mascotes flutuantes")
+    ap.add_argument("--verificar-voz", action="store_true", dest="verificar_voz",
+                    help="grava em logs/voz.txt se a transcrição local está disponível e sai")
     ap.add_argument("--sair-apos", type=float, dest="sair_apos",
                     help="abre normalmente e fecha após N segundos (teste automático do modo normal)")
     return ap.parse_args(argv)
@@ -70,6 +72,8 @@ def _setup_demo() -> dict:
 def main(argv=None) -> int:
     args = _args(sys.argv[1:] if argv is None else argv)
     from . import diagnostics as dg
+    if args.verificar_voz:
+        return _check_voice(dg)
     if not args.captura:
         dg.install()
     dg.step(f"início • args={sys.argv[1:] if argv is None else argv} • congelado={getattr(sys, 'frozen', False)}"
@@ -150,6 +154,27 @@ def main(argv=None) -> int:
     code = app.exec()
     dg.step(f"encerrado • código={code}")
     return code
+
+
+def _check_voice(dg) -> int:
+    """Import the voice stack for real (no microphone needed) and record the result."""
+    from ..appdirs import data_dir
+    from ..voice import stt
+    lines = []
+    st = stt.status(data_dir() / "modelos")
+    lines.append(f"faltando={st.missing}")
+    ok = st.ready
+    for mod in ("numpy", "faster_whisper", "ctranslate2", "sounddevice"):
+        try:
+            __import__(mod)
+            lines.append(f"{mod}: ok")
+        except Exception as exc:  # report precisely what fails inside the frozen build
+            ok = False
+            lines.append(f"{mod}: ERRO {type(exc).__name__}: {exc}")
+    lines.append("RESULTADO: " + ("PRONTO" if ok else "INDISPONIVEL"))
+    (dg.logs_dir() / "voz.txt").write_text("\n".join(lines), encoding="utf-8")
+    print("\n".join(lines))
+    return 0 if ok else 4
 
 
 def _seed_demo(store, engine, demo):

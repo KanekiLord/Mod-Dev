@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.1.2 — 25/11/2026
+
+### Corrigido
+- **Voz no executável**: o .exe era gerado sem a transcrição local e mandava rodar INSTALAR.bat/pip, que não
+  funcionam na versão executável. O build agora inclui faster-whisper e o acesso ao microfone, e o CI verifica
+  que o próprio .exe consegue carregá-los (`--verificar-voz`). O modelo continua sendo baixado só com sua autorização.
+
 ## 4.1.1 — 25/11/2026
 
 ### Corrigido
