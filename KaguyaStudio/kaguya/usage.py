@@ -171,6 +171,12 @@ class AppServerClient:
                 self.proc.kill()
             except OSError:
                 pass
+        for stream in (self.proc.stdout, self.proc.stderr):
+            try:
+                if stream:
+                    stream.close()
+            except OSError:
+                pass
 
 
 def _g(d: dict, *keys, default=None):

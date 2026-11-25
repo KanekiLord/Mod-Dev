@@ -120,7 +120,8 @@ def _basic(check: FolderCheck, path: Path) -> bool:
         check.problems.append("O caminho aponta para um arquivo, não para uma pasta.")
         return False
     try:
-        next(iter(os.scandir(path)), None)
+        with os.scandir(path) as entries:
+            next(iter(entries), None)
         check.readable = True
     except PermissionError:
         check.problems.append("Sem permissão de leitura nesta pasta.")
