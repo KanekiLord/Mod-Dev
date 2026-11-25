@@ -1,5 +1,28 @@
 # Changelog
 
+## 4.9.0 — 25/11/2026
+
+### Novo
+- **Instalador para Windows** (`KaguyaStudio-Instalador-4.9.0.exe`): instala só para o seu usuário, sem pedir
+  administrador, com atalho no menu Iniciar, atalho opcional na área de trabalho, opção "iniciar com o Windows na
+  bandeja" e desinstalador. **Para atualizar, rode o instalador da versão nova**: ele encontra a instalação, fecha o
+  Studio aberto (mesmo na bandeja), troca os arquivos e mantém seus dados. Desinstalar não apaga seus dados.
+- **Uma cópia só do Studio**: abrir de novo traz a janela que já está aberta (útil com a bandeja).
+- **Boca e gestos ao falar**: a Kaguya (3 sequências: fala, explicando, acolhedora) e a Miwa (fala, explicando,
+  pensando, acenando) mexem a boca e gesticulam enquanto a voz toca — no Live, nas mascotes flutuantes e nos cartões.
+  Desliga em Configurações › Mascotes ou no menu da mascote.
+  - Quadros da Kaguya refeitos a partir das folhas originais do pacote (o recorte do pacote deixava manchas do fundo e
+    buracos no cabelo); o pacote original fica guardado intacto.
+  - **Miwa V2 (fala e gestos)** virou o visual padrão (o desenho do pacote é outro, então ela usa o conjunto todo para
+    não trocar de roupa no meio da fala); a Miwa V1 continua disponível.
+- **Personalidade configurável** (Configurações › Personalidade): estilo (Kaguya/Miwa clássicas, fofa, séria,
+  engraçada, tsundere, mentora, gamer ou só o seu texto), apelido para você, tratamento, humor, tamanho das respostas,
+  emojis e texto livre. Vale na conversa, na voz, no "chamar pelo nome" e nas tarefas — muda só o jeito de falar.
+
+### Corrigido
+- Captura automática podia ficar aberta para sempre com a bandeja ativa (Qt 6 cancela o `quit()` quando uma janela
+  recusa fechar); o CI ganhou limite de tempo por etapa.
+
 ## 4.8.0 — 25/11/2026
 
 ### Novo

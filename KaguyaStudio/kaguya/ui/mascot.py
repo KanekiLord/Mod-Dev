@@ -45,8 +45,30 @@ VARIANTS = {
                           "thinking": "pensando", "approved": "confiante", "rejected": "entediada"}},
         "v1": {"label": "Kaguya V1 (18 expressões + animações)", "animated": True},
     },
+    "claude": {
+        "v2": {"folder": "miwa_v2", "prefix": "miwa", "label": "Miwa V2 (fala e gestos)", "animated": False,
+               "expressions": ["neutra", "feliz", "pensando", "falando", "surpresa", "explicando"],
+               "states": {"idle": "neutra", "running": "pensando", "success": "feliz", "error": "surpresa",
+                          "cancelled": "pensando", "limit": "pensando", "speaking": "falando", "listening": "neutra",
+                          "thinking": "pensando", "approved": "feliz", "rejected": "explicando"}},
+        "v1": {"label": "Miwa V1 (9 expressões)"},
+    },
 }
-DEFAULT_VARIANT = {"codex": "v2"}
+DEFAULT_VARIANT = {"codex": "v2", "claude": "v2"}
+
+# Talking animations (mouth + gestures) played while the voice is actually speaking.
+# frames are 1-based indexes; weight = how often the sequence is chosen.
+TALK = {
+    ("codex", "v2"): {"path": "fala/{seq}/{seq}_{i:02d}.png", "sequences": {
+        "talk_basic": {"frames": [1, 2, 3, 4, 3, 2], "ms": 150, "weight": 4},
+        "talk_explaining": {"frames": [1, 2, 3, 4, 5, 6], "ms": 160, "weight": 2},
+        "talk_warm": {"frames": [1, 2, 3, 4, 5, 6], "ms": 170, "weight": 2}}},
+    ("claude", "v2"): {"path": "fala/{seq}/{seq}_{i:02d}.png", "sequences": {
+        "fala_normal": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 4},
+        "explicando": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 2},
+        "pensando_falando": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 1},
+        "animada_acenando": {"frames": [1, 2, 3, 4], "ms": [220, 140, 150, 180], "weight": 1}}},
+}
 
 STATE_LABELS = {"idle": "Aguardando", "running": "Trabalhando", "success": "Concluiu o turno", "error": "Erro",
                 "cancelled": "Interrompido", "limit": "Limite atingido", "speaking": "Falando", "listening": "Ouvindo",
@@ -63,6 +85,7 @@ class MascotPrefs:
     crisp: bool = True
     animations: bool = False
     variant: str = ""
+    talk: bool = True            # mouth/gesture animation while speaking
 
 
 class Mascot(QObject):
@@ -82,6 +105,12 @@ class Mascot(QObject):
         self._cache: dict[tuple[str, bool], QImage] = {}
         self.window: FloatingMascot | None = None
         self.tick = 0
+        self.talk_frame: Path | None = None
+        self._talk_seq: list[tuple[Path, int]] = []
+        self._talk_pos = 0
+        self._talk_timer = QTimer(self)
+        self._talk_timer.setSingleShot(True)
+        self._talk_timer.timeout.connect(self._talk_step)
 
     def _load_prefs(self) -> MascotPrefs:
         try:
@@ -109,7 +138,58 @@ class Mascot(QObject):
         self.prefs_path.parent.mkdir(parents=True, exist_ok=True)
         self.prefs_path.write_text(json.dumps(asdict(self.prefs), indent=2), encoding="utf-8")
 
+    # ------------------------------------------------------------------ talking
+    def talk_config(self) -> dict | None:
+        return TALK.get((self.agent, self.prefs.variant)) if self.prefs.talk else None
+
+    def talk_sequence(self, name: str | None = None) -> list[tuple[Path, int]]:
+        """[(frame path, duration ms)] of one pass of a talking sequence (random by weight if no name)."""
+        import random
+        cfg = self.talk_config()
+        if not cfg:
+            return []
+        seqs = cfg["sequences"]
+        if name is None:
+            names = list(seqs)
+            name = random.choices(names, weights=[seqs[n].get("weight", 1) for n in names])[0]
+        spec = seqs[name]
+        base = ASSETS / "mascots" / self.profile["folder"]
+        ms = spec["ms"]
+        out = []
+        for k, i in enumerate(spec["frames"]):
+            p = base / cfg["path"].format(seq=name, i=i)
+            if p.is_file():
+                out.append((p, ms[k % len(ms)] if isinstance(ms, list) else ms))
+        return out
+
+    def _start_talk(self):
+        self._talk_seq, self._talk_pos = self.talk_sequence(), 0
+        if self._talk_seq:
+            self._talk_step()
+
+    def _stop_talk(self):
+        self._talk_timer.stop()
+        self.talk_frame = None
+        self._talk_seq = []
+
+    def _talk_step(self):
+        if self.state != "speaking":
+            self._stop_talk()
+            return
+        if self._talk_pos >= len(self._talk_seq):  # one pass done: next gesture
+            self._talk_seq, self._talk_pos = self.talk_sequence(), 0
+            if not self._talk_seq:
+                return
+        self.talk_frame, ms = self._talk_seq[self._talk_pos]
+        self._talk_pos += 1
+        self._talk_timer.start(ms)
+        self.changed.emit()
+        if self.window:
+            self.window.update()
+
     def sprite_path(self, expression: str) -> Path:
+        if self.talk_frame is not None and self.state == "speaking":
+            return self.talk_frame
         base = ASSETS / "mascots" / self.profile["folder"]
         if self.prefs.animations and self.profile.get("animated", self.agent == "codex"):
             seq = None
@@ -133,8 +213,13 @@ class Mascot(QObject):
         return self._cache[key]
 
     def set_state(self, state: str):
+        was = self.state
         self.state = state
         self.expression = self.profile["states"].get(state, "neutra")
+        if state == "speaking" and was != "speaking":
+            self._start_talk()
+        elif state != "speaking":
+            self._stop_talk()
         self.changed.emit()
         if self.window:
             self.window.update()
@@ -266,6 +351,10 @@ class FloatingMascot(QWidget):
                 act = QAction(text, vmenu, checkable=True, checked=self.m.prefs.variant == key)
                 act.triggered.connect(lambda _=False, k=key: (self.m.set_variant(k), self.update()))
                 vmenu.addAction(act)
+        if self.m.talk_config() is not None or TALK.get((self.m.agent, self.m.prefs.variant)):
+            talk = QAction("Boca e gestos ao falar", menu, checkable=True, checked=self.m.prefs.talk)
+            talk.toggled.connect(lambda on: (setattr(self.m.prefs, "talk", on), self.m.save()))
+            menu.addAction(talk)
         if self.m.profile.get("animated"):
             anim = QAction("Animações experimentais", menu, checkable=True, checked=self.m.prefs.animations)
             anim.toggled.connect(self._set_anim)

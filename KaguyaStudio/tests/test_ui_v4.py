@@ -453,6 +453,60 @@ class PcModeUi(UiBase):
         w.wake.bubble.hide()
 
 
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class TalkingMascots(UiBase):
+    def test_talk_frames_cycle_while_speaking_then_stop(self):
+        from kaguya.ui.mascot import Mascot
+        for agent, prefix in (("codex", "kaguya_v2/fala/"), ("claude", "miwa_v2/fala/")):
+            m = Mascot(agent, Path(self.tmp.name) / f"m_{agent}.json")
+            self.assertEqual(m.prefs.variant, "v2")
+            for seq in m.talk_config()["sequences"]:
+                frames = m.talk_sequence(seq)
+                self.assertTrue(frames and all(p.is_file() for p, _ in frames), seq)
+            idle = m.sprite_path(m.expression)
+            m.set_state("speaking")
+            seen = set()
+            self.assertTrue(self.pump(lambda: seen.add(str(m.sprite_path(m.expression))) or len(seen) >= 3, 5))
+            self.assertTrue(all(prefix.replace("/", os.sep) in p or prefix in p for p in seen))
+            m.set_state("idle")
+            self.assertIsNone(m.talk_frame)
+            self.assertEqual(m.sprite_path(m.expression), idle)
+            m.prefs.talk = False                       # can be turned off
+            m.set_state("speaking")
+            self.assertIsNone(m.talk_frame)
+            self.assertFalse(m.image().isNull())
+
+    def test_rebuilt_kaguya_frames_have_no_background_or_hair_holes(self):
+        from PySide6.QtGui import QImage
+        root = Path(__file__).resolve().parents[1] / "assets" / "mascots" / "kaguya_v2" / "fala"
+        for f in sorted(root.glob("talk_*/*.png")):
+            img = QImage(str(f))
+            self.assertEqual((img.width(), img.height()), (128, 128))
+            corners = [img.pixelColor(x, y).alpha() for x, y in ((0, 0), (127, 0), (10, 10), (117, 10))]
+            self.assertEqual(corners, [0, 0, 0, 0], f.name)      # no background patches left in the corners
+        orig = root / "pacote_original" / "sheets" / "talk_basic_sheet_original.png"
+        self.assertTrue(orig.is_file())                          # the user's original pack is preserved
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class PersonaUi(UiBase):
+    def test_settings_card_saves_personality(self):
+        from kaguya import persona
+        from kaguya.ui.page_system import PersonaCard
+        w = self.window()
+        w.go("settings")
+        card = w.settings.findChildren(PersonaCard)[0]
+        f = card.forms["claude"]
+        f["preset"].setCurrentIndex(f["preset"].findData("tsundere"))
+        f["nickname"].setText("senpai")
+        f["nickname"].editingFinished.emit()
+        f["extra"].setPlainText("chama bugs de Akatsuki")
+        p = persona.load(self.store, "claude")
+        self.assertEqual((p.preset, p.nickname, p.extra), ("tsundere", "senpai", "chama bugs de Akatsuki"))
+        self.assertIn("Tsundere", f["preview"].text())
+        self.assertEqual(persona.load(self.store, "codex").preset, "kaguya")  # the other one untouched
+
+
 def tearDownModule():
     """Destroy every top-level window while QApplication still exists (Qt objects that survive until
     interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""

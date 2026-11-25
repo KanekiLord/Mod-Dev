@@ -931,14 +931,17 @@ class MainWindow(QMainWindow):
         engine, store = self.engine, self.store
 
         def make(a):
+            from .. import persona
             res = exes.get(a)
             if isinstance(res, Exception):
                 raise res
             exe, _caps = res
+            style = persona.for_agent(store, a, voice=True)
             if a == "claude":
                 return ClaudeConversation(exe, cwd, model=store.get_setting("live.model_claude", "haiku"), env=engine.env,
-                                          on_rate_limit=engine._record_claude_limit)
-            return CodexConversation(exe, cwd, model=store.get_setting("live.model_codex", ""), env=engine.env)
+                                          on_rate_limit=engine._record_claude_limit, extra_instructions=style)
+            return CodexConversation(exe, cwd, model=store.get_setting("live.model_codex", ""), env=engine.env,
+                                     extra_instructions=style)
         return make
 
     def set_wake(self, on: bool):
@@ -1437,13 +1440,14 @@ class MainWindow(QMainWindow):
                                   "As IAs seguem trabalhando em segundo plano. Clique no ícone da Kaguya perto do relógio "
                                   "para abrir de novo, ou use Sair no menu dele para fechar de vez.", self.windowIcon(), 8000)
 
-    def quit_app(self):
+    def quit_app(self, force: bool = False):
         self._quitting = True
+        self._force_quit = force
         if self.close():
             from PySide6.QtWidgets import QApplication
             if self.tray:
                 self.tray.hide()
-            QApplication.instance().quit()
+            QApplication.instance().exit(0)  # not quit(): the floating mascots would be asked to close too
         else:
             self._quitting = False
 
@@ -1461,7 +1465,7 @@ class MainWindow(QMainWindow):
             self.to_background()
             return
         busy = [p for p in self.store.projects() if self.engine.is_running(p["id"])]
-        if busy and QMessageBox.question(self, "Encerrar", "Há IAs trabalhando. Fechar interrompe as tarefas (ficam como "
+        if busy and not getattr(self, "_force_quit", False) and QMessageBox.question(self, "Encerrar", "Há IAs trabalhando. Fechar interrompe as tarefas (ficam como "
                                          "'interrompidas' e podem ser retomadas). Fechar mesmo assim?") != QMessageBox.Yes:
             e.ignore()
             return

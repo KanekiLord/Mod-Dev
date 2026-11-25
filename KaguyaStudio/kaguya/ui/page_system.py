@@ -521,6 +521,7 @@ class SettingsPage(QWidget):
         dform.addRow("Máx. ações por tarefa", self.desk_max)
         dc.lay.addLayout(dform)
         lay.addWidget(dc)
+        lay.addWidget(PersonaCard(win))
         # voice
         vc = Card()
         vc.lay.addWidget(label("VOZ LOCAL (SEM API PAGA)", "section"))
@@ -635,11 +636,24 @@ class SettingsPage(QWidget):
         self.kaguya_variant.currentIndexChanged.connect(lambda: km.set_variant(self.kaguya_variant.currentData()))
         mrow.addWidget(label("Visual da Kaguya", "dim"))
         mrow.addWidget(self.kaguya_variant)
+        self.miwa_variant = QComboBox()
+        mm = win.mascots["claude"]
+        for key, text in mm.variants():
+            self.miwa_variant.addItem(text, key)
+            if key == mm.prefs.variant:
+                self.miwa_variant.setCurrentIndex(self.miwa_variant.count() - 1)
+        self.miwa_variant.currentIndexChanged.connect(lambda: mm.set_variant(self.miwa_variant.currentData()))
+        mrow.addWidget(label("da Miwa", "dim"))
+        mrow.addWidget(self.miwa_variant)
         imp = button("Importar dados da V3.x", "download", "ghost", "Copia projetos e fila da V3 (o banco antigo não é alterado)")
         imp.clicked.connect(self.import_v3)
         mrow.addWidget(imp)
         mrow.addStretch(1)
         mc.lay.addLayout(mrow)
+        self.t_talk = Toggle("Boca e gestos animados enquanto elas falam",
+                             all(m.prefs.talk for m in win.mascots.values()))
+        self.t_talk.toggled.connect(lambda on: [setattr(m.prefs, "talk", on) or m.save() for m in win.mascots.values()])
+        mc.lay.addWidget(self.t_talk)
         mc.lay.addWidget(label(f"Dados do Studio: {win.engine.home}", "dim", selectable=True))
         lay.addWidget(mc)
         lay.addStretch(1)
@@ -819,3 +833,96 @@ class SettingsPage(QWidget):
         QMessageBox.information(self, "Importação", f"{rep['projects']} projeto(s) e {rep['tasks']} tarefa(s) importados."
                                 + (f"\nVault global: {rep['vault']}" if rep["vault"] else ""))
         self.win.refresh_all()
+
+
+class PersonaCard(Card):
+    """Configurable personality for Kaguya (Codex) and Miwa (Claude Code)."""
+
+    def __init__(self, win):
+        super().__init__(accent=C["violet"])
+        from PySide6.QtWidgets import QPlainTextEdit
+        from .. import persona
+        self.win, self.persona = win, persona
+        self.lay.addWidget(label("PERSONALIDADE", "section"))
+        self.lay.addWidget(label("Como a Kaguya e a Miwa falam com você — na conversa, por voz e nas respostas das "
+                                 "tarefas. Muda só o jeito: as regras, permissões e confirmações continuam valendo.",
+                                 "muted", wrap=True))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        self.forms = {}
+        for col, agent in enumerate(("codex", "claude")):
+            p = persona.load(win.store, agent)
+            box = QVBoxLayout()
+            title = label(f"{AGENT[agent]['mascot']} ({AGENT[agent]['name']})", "h2")
+            title.setStyleSheet(f"color: {AGENT[agent]['color']};")
+            box.addWidget(title)
+            f = {}
+            f["enabled"] = Toggle("Usar personalidade", p.enabled)
+            f["preset"] = QComboBox()
+            for key, spec in persona.PRESETS.items():
+                f["preset"].addItem(spec["label"], key)
+            f["preset"].setCurrentIndex(max(0, f["preset"].findData(p.preset)))
+            f["nickname"] = QLineEdit(p.nickname)
+            f["nickname"].setPlaceholderText("como ela te chama (ex.: chefe, senpai, seu nome)")
+            f["formality"] = QComboBox()
+            for key, text in (("voce", "Você"), ("tu", "Tu"), ("formal", "Formal")):
+                f["formality"].addItem(text, key)
+            f["formality"].setCurrentIndex(max(0, f["formality"].findData(p.formality)))
+            f["humor"] = QComboBox()
+            for key, text in ((0, "Sem piadas"), (1, "Humor leve"), (2, "Muito humor")):
+                f["humor"].addItem(text, key)
+            f["humor"].setCurrentIndex(max(0, f["humor"].findData(int(p.humor))))
+            f["length"] = QComboBox()
+            for key, text in (("curta", "Curtas"), ("media", "Normais"), ("detalhada", "Detalhadas")):
+                f["length"].addItem(text, key)
+            f["length"].setCurrentIndex(max(0, f["length"].findData(p.length)))
+            f["emoji"] = Toggle("Emojis no texto (nunca na voz)", p.emoji)
+            f["extra"] = QPlainTextEdit(p.extra)
+            f["extra"].setPlaceholderText("Do seu jeito, ex.: \"fala como uma ninja de Konoha\", \"me lembra de beber "
+                                          "água\", \"chama os bugs de Akatsuki\"…")
+            f["extra"].setFixedHeight(70)
+            form = QFormLayout()
+            form.setVerticalSpacing(6)
+            form.addRow("Estilo", f["preset"])
+            form.addRow("Apelido", f["nickname"])
+            form.addRow("Tratamento", f["formality"])
+            form.addRow("Humor", f["humor"])
+            form.addRow("Respostas", f["length"])
+            box.addWidget(f["enabled"])
+            box.addLayout(form)
+            box.addWidget(f["emoji"])
+            box.addWidget(label("Texto livre", "dim"))
+            box.addWidget(f["extra"])
+            f["preview"] = label("", "dim", wrap=True)
+            f["preview"].setStyleSheet(f"color: {C['dim']}; font-size: 8.4pt;")
+            box.addWidget(f["preview"])
+            for key in ("preset", "formality", "humor", "length"):
+                f[key].currentIndexChanged.connect(lambda _=0, a=agent: self.save(a))
+            for key in ("enabled", "emoji"):
+                f[key].toggled.connect(lambda _=False, a=agent: self.save(a))
+            f["nickname"].editingFinished.connect(lambda a=agent: self.save(a))
+            f["extra"].textChanged.connect(lambda a=agent: self.save(a))
+            self.forms[agent] = f
+            grid.addLayout(box, 0, col)
+            self._preview(agent, p)
+        self.lay.addLayout(grid)
+
+    def current(self, agent: str):
+        f = self.forms[agent]
+        p = self.persona.Persona(preset=f["preset"].currentData(), nickname=f["nickname"].text().strip(),
+                                 formality=f["formality"].currentData(), humor=int(f["humor"].currentData()),
+                                 length=f["length"].currentData(), emoji=f["emoji"].isChecked(),
+                                 extra=f["extra"].toPlainText().strip()[:800], enabled=f["enabled"].isChecked())
+        p._agent = agent
+        return p
+
+    def save(self, agent: str):
+        p = self.current(agent)
+        self.persona.save(self.win.store, agent, p)
+        self._preview(agent, p)
+
+    def _preview(self, agent, p):
+        spec = self.persona.PRESETS.get(p.preset, {})
+        text = spec.get("text") or "(só o texto livre)"
+        self.forms[agent]["preview"].setText(("Desligada." if not p.enabled else text)[:220])
+

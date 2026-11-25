@@ -1,0 +1,105 @@
+{
+  "package": "Kaguya Talk Pack",
+  "frame_size": 128,
+  "sequences": [
+    {
+      "name": "talk_basic",
+      "description": "Fala básica com movimentos sutis de boca e um gesto final no peito.",
+      "frame_count": 6,
+      "normalized_sheet": "sheets/talk_basic_sheet_128.png",
+      "original_sheet": "sheets/talk_basic_sheet_original.png",
+      "frames": [
+        {
+          "file": "sequences/talk_basic/talk_basic_01.png",
+          "index": 1
+        },
+        {
+          "file": "sequences/talk_basic/talk_basic_02.png",
+          "index": 2
+        },
+        {
+          "file": "sequences/talk_basic/talk_basic_03.png",
+          "index": 3
+        },
+        {
+          "file": "sequences/talk_basic/talk_basic_04.png",
+          "index": 4
+        },
+        {
+          "file": "sequences/talk_basic/talk_basic_05.png",
+          "index": 5
+        },
+        {
+          "file": "sequences/talk_basic/talk_basic_06.png",
+          "index": 6
+        }
+      ]
+    },
+    {
+      "name": "talk_explaining",
+      "description": "Fala explicativa com gesto apontando e palma aberta.",
+      "frame_count": 6,
+      "normalized_sheet": "sheets/talk_explaining_sheet_128.png",
+      "original_sheet": "sheets/talk_explaining_sheet_original.png",
+      "frames": [
+        {
+          "file": "sequences/talk_explaining/talk_explaining_01.png",
+          "index": 1
+        },
+        {
+          "file": "sequences/talk_explaining/talk_explaining_02.png",
+          "index": 2
+        },
+        {
+          "file": "sequences/talk_explaining/talk_explaining_03.png",
+          "index": 3
+        },
+        {
+          "file": "sequences/talk_explaining/talk_explaining_04.png",
+          "index": 4
+        },
+        {
+          "file": "sequences/talk_explaining/talk_explaining_05.png",
+          "index": 5
+        },
+        {
+          "file": "sequences/talk_explaining/talk_explaining_06.png",
+          "index": 6
+        }
+      ]
+    },
+    {
+      "name": "talk_warm",
+      "description": "Fala suave e acolhedora com expressões delicadas.",
+      "frame_count": 6,
+      "normalized_sheet": "sheets/talk_warm_sheet_128.png",
+      "original_sheet": "sheets/talk_warm_sheet_original.png",
+      "frames": [
+        {
+          "file": "sequences/talk_warm/talk_warm_01.png",
+          "index": 1
+        },
+        {
+          "file": "sequences/talk_warm/talk_warm_02.png",
+          "index": 2
+        },
+        {
+          "file": "sequences/talk_warm/talk_warm_03.png",
+          "index": 3
+        },
+        {
+          "file": "sequences/talk_warm/talk_warm_04.png",
+          "index": 4
+        },
+        {
+          "file": "sequences/talk_warm/talk_warm_05.png",
+          "index": 5
+        },
+        {
+          "file": "sequences/talk_warm/talk_warm_06.png",
+          "index": 6
+        }
+      ]
+    }
+  ]
+}

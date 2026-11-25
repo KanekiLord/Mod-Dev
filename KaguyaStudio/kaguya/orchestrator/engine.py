@@ -367,12 +367,23 @@ class Engine:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    def _with_persona(self, prompt: str, agent: str) -> str:
+        """The user's personality for Kaguya/Miwa goes after the rules, right before the task."""
+        from .. import persona
+        block = persona.for_agent(self.store, agent)
+        if not block:
+            return prompt
+        if "\n\nTAREFA:\n" in prompt:
+            return prompt.replace("\n\nTAREFA:\n", f"\n\n{block}\n\nTAREFA:\n", 1)
+        return prompt + "\n\n" + block
+
     def _turn(self, pid: int, tid: int, agent: str, cwd: Path, prompt: str, opts: RunOptions,
               cancel: threading.Event, log_name: str, stage: str) -> RunResult:
         block = self.limit_block(agent)
         if block:
             raise TaskFailed(block, "blocked_limit")
         exe, caps = self.ensure_ready(agent, str(cwd))
+        prompt = self._with_persona(prompt, agent)
         self.emit("agent_state", pid=pid, task_id=tid, agent=agent, state="running", stage=stage)
         self.store.append_event(tid, "stage", f"{stage}: {agent}", agent)
 

@@ -1,0 +1,77 @@
+{
+  "nome": "Claude Code — Mascote de Fala e Gestos",
+  "versao": "1.0",
+  "formato": "RGBA PNG",
+  "tamanhos": [
+    128,
+    256
+  ],
+  "animacoes": {
+    "fala_normal": {
+      "frames": [
+        "fala_normal_01.png",
+        "fala_normal_02.png",
+        "fala_normal_03.png",
+        "fala_normal_04.png"
+      ],
+      "duracao_ms": [
+        220,
+        140,
+        150,
+        180
+      ],
+      "loop": true
+    },
+    "explicando": {
+      "frames": [
+        "explicando_01.png",
+        "explicando_02.png",
+        "explicando_03.png",
+        "explicando_04.png"
+      ],
+      "duracao_ms": [
+        220,
+        140,
+        150,
+        180
+      ],
+      "loop": true
+    },
+    "pensando_falando": {
+      "frames": [
+        "pensando_falando_01.png",
+        "pensando_falando_02.png",
+        "pensando_falando_03.png",
+        "pensando_falando_04.png"
+      ],
+      "duracao_ms": [
+        220,
+        140,
+        150,
+        180
+      ],
+      "loop": true
+    },
+    "animada_acenando": {
+      "frames": [
+        "animada_acenando_01.png",
+        "animada_acenando_02.png",
+        "animada_acenando_03.png",
+        "animada_acenando_04.png"
+      ],
+      "duracao_ms": [
+        220,
+        140,
+        150,
+        180
+      ],
+      "loop": true
+    }
+  },
+  "observacoes": [
+    "Originais e nova folha preservados separadamente.",
+    "Os quadros são poses completas, não camadas labiais independentes.",
+    "A animação é cíclica e não sincroniza fonemas automaticamente.",
+    "Sprites produzidos por geração de imagem e recortados em grade 4×4; revisar visualmente a transição entre os quadros antes do uso definitivo."
+  ]
+}

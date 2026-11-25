@@ -27,6 +27,18 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Instalador, fala animada e personalidade (4.9.0)
+
+- **CI Windows** (passo "Instalador"): gera o instalador com Inno Setup, instala em silêncio só para o usuário,
+  confere o atalho do menu Iniciar, abre o Studio instalado na bandeja e roda o instalador de novo — ele precisa fechar
+  o Studio aberto e atualizar —, depois desinstala e confere que os dados do usuário continuam.
+- Real (Linux): segunda cópia só traz a primeira para a frente; `--sair` fecha a aberta; sem cópia aberta sai em silêncio.
+- `test_ui_v4.py › TalkingMascots`: quadros trocam enquanto fala e voltam ao normal ao parar, para as duas; pode
+  desligar; os quadros refeitos da Kaguya não têm fundo nos cantos e o pacote original está preservado.
+- `test_persona.py`: padrões por IA, salvar, texto gerado (apelido, tratamento, humor, tamanho, emojis só no texto),
+  desligar; a personalidade vai **depois** das regras no texto realmente enviado à CLI.
+  `test_ui_v4.py › PersonaUi`: a tela salva por IA sem afetar a outra.
+
 ## Meu computador (4.8.0)
 
 - `test_pc_mode.py`: horários ("16:30", "9h" → amanhã, data completa), timers que vencem, evento .ics correto;

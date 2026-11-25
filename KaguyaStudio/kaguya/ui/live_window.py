@@ -83,6 +83,8 @@ class LiveWindow(QWidget):
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._refresh_sprite)
         self._timer.start()
+        for m in win.mascots.values():  # talking frames change faster than the timer
+            m.changed.connect(self._refresh_sprite)
 
     def paintEvent(self, e):
         p = QPainter(self)

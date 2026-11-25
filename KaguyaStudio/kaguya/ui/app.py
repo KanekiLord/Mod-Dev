@@ -28,6 +28,8 @@ def _args(argv):
     ap.add_argument("--flutuantes", action="store_true", help="em --captura, também captura as mascotes flutuantes")
     ap.add_argument("--verificar-voz", action="store_true", dest="verificar_voz",
                     help="grava em logs/voz.txt se a transcrição local está disponível e sai")
+    ap.add_argument("--sair", action="store_true",
+                    help="pede para o Kaguya Studio aberto fechar (usado pelo instalador antes de atualizar)")
     ap.add_argument("--segundo-plano", action="store_true", dest="segundo_plano",
                     help="abre direto na bandeja (perto do relógio), sem mostrar a janela")
     ap.add_argument("--sair-apos", type=float, dest="sair_apos",
@@ -103,6 +105,14 @@ def main(argv=None) -> int:
         dg.start_watchdog(app)
     app.setApplicationName("Kaguya Studio")
     app.setOrganizationName("KaguyaStudio")
+    single = not (args.captura or args.demo or args.mascotes)
+    if single or args.sair:
+        from . import single as one
+        if one.send("sair" if args.sair else ("bandeja" if args.segundo_plano else "mostrar")):
+            dg.step("outra cópia já está aberta: comando enviado a ela")
+            return 0
+        if args.sair:
+            return 0  # nothing running
 
     from . import theme
     theme.load_fonts()
@@ -143,6 +153,16 @@ def main(argv=None) -> int:
         return app.exec()
     if args.captura:
         return _capture(app, win, args)
+    if single:
+        from .single import InstanceServer
+
+        def command(msg):
+            if msg == "mostrar":
+                win.show_from_tray()
+            elif msg == "sair":
+                dg.step("pedido para sair (instalador/atualização)")
+                win.quit_app(force=True)
+        win._instance_server = InstanceServer(command, win)
     if args.segundo_plano and getattr(win, "tray", None):
         dg.step("iniciado na bandeja")
     else:
@@ -217,6 +237,8 @@ def _seed_demo(store, engine, demo):
 
 def _capture(app, win, args) -> int:
     from PySide6.QtCore import QTimer
+    import faulthandler
+    faulthandler.dump_traceback_later(120, exit=True)  # automated runs must never hang: dump stacks and exit
     w, h = (int(x) for x in args.tamanho.lower().split("x"))
     win.resize(w, h)
     win.show()
@@ -238,7 +260,9 @@ def _capture(app, win, args) -> int:
                 if m.window:
                     m.window.grab().save(str(out.with_name(out.stem + f"_flutuante_{m.agent}.png")))
         print(f"captura: {out} ({pm.width()}x{pm.height()} px, escala {args.escala or 1})")
-        app.quit()
+        # exit(), not quit(): in Qt 6 quit() first asks every window to close, and the main window
+        # declines (it goes to the tray), which would keep the process alive forever
+        app.exit(0)
     QTimer.singleShot(1200, shot)
     return app.exec()
 

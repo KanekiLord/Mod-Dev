@@ -35,6 +35,7 @@ jobs:
         run: python -c "from pathlib import Path; from kaguya.voice.neural import NeuralVoices; v=NeuralVoices(Path('ci-modelos')); v.download(); print('instaladas:', v.installed())"
 
       - name: Testes automatizados (inclui CLIs reais sem conta)
+        timeout-minutes: 15
         env:
           QT_QPA_PLATFORM: offscreen
           KAGUYA_TEST_REAL_CLIS: "1"
@@ -43,6 +44,7 @@ jobs:
         run: python -m unittest discover -s tests -t . -v
 
       - name: Capturas no Windows (100/125/150/200%)
+        timeout-minutes: 10
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
@@ -60,6 +62,7 @@ jobs:
         run: python tools/build_windows.py
 
       - name: Fumaça do executável (abre e renderiza Diagnóstico)
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $env:KAGUYA_HOME = "$env:RUNNER_TEMP\kaguya-exe"
@@ -75,6 +78,7 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "voz indisponível no executável (código $($p.ExitCode))" }
 
       - name: Controle do computador pelo executável (servidor MCP real, entrada e captura do Windows)
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $env:KAGUYA_DESKTOP_DIR = "$env:RUNNER_TEMP\kaguya-desktop"
@@ -97,6 +101,40 @@ jobs:
           Copy-Item "$base\lad\KaguyaStudio\logs" capturas\logs-modo-normal -Recurse -ErrorAction SilentlyContinue
           if ($code -ne 0) { throw "modo normal falhou (código $code)" }
 
+      - name: Instalador (Inno Setup) — instalar, atualizar com o Studio aberto e desinstalar
+        timeout-minutes: 25
+        shell: pwsh
+        run: |
+          $v = python -c "import kaguya; print(kaguya.VERSION)"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Q "/DAppVersion=$v" "/DSourceDir=..\dist\KaguyaStudio" instalador\KaguyaStudio.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falhou ($LASTEXITCODE)" }
+          $setup = "dist\KaguyaStudio-Instalador-$v.exe"
+          "{0:N0} MB" -f ((Get-Item $setup).Length / 1MB)
+          $app = "$env:LOCALAPPDATA\Programs\Kaguya Studio\KaguyaStudio.exe"
+          # 1) instalação nova, silenciosa, só para o usuário
+          $p = Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/LOG=$env:RUNNER_TEMP\inst1.log" -PassThru -Wait
+          if ($p.ExitCode -ne 0 -or -not (Test-Path $app)) { Get-Content "$env:RUNNER_TEMP\inst1.log" -Tail 40; throw "instalação falhou ($($p.ExitCode))" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Kaguya Studio.lnk")) { throw "atalho do menu Iniciar não criado" }
+          # 2) atualização por cima com o Studio ABERTO (na bandeja): o instalador deve fechá-lo e trocar os arquivos
+          $running = Start-Process $app -ArgumentList "--segundo-plano" -PassThru
+          Start-Sleep -Seconds 12
+          if ($running.HasExited) { throw "o Studio instalado não ficou aberto (código $($running.ExitCode))" }
+          $p = Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/LOG=$env:RUNNER_TEMP\inst2.log" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\inst2.log" -Tail 60; throw "atualização falhou ($($p.ExitCode))" }
+          if (-not $running.HasExited) { Stop-Process -Id $running.Id -Force; throw "o instalador não fechou o Studio aberto" }
+          Write-Host "Studio aberto foi fechado pelo instalador (código $($running.ExitCode)) e a atualização concluiu"
+          $data = "$env:LOCALAPPDATA\KaguyaStudio\studio.sqlite3"
+          if (-not (Test-Path $data)) { throw "dados do usuário não encontrados" }
+          # 3) desinstalar mantém os dados do usuário
+          $unins = Get-ChildItem "$env:LOCALAPPDATA\Programs\Kaguya Studio" -Filter "unins*.exe" | Select-Object -First 1
+          $p = Start-Process $unins.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -PassThru -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path $app) { throw "desinstalação deixou o programa" }
+          if (-not (Test-Path $data)) { throw "desinstalação apagou os dados do usuário" }
+          Write-Host "instalar, atualizar com o app aberto e desinstalar (mantendo dados): OK"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -107,3 +145,9 @@ jobs:
         with:
           name: KaguyaStudio-windows
           path: KaguyaStudio/dist/KaguyaStudio-*-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KaguyaStudio-Instalador
+          path: KaguyaStudio/dist/KaguyaStudio-Instalador-*.exe
+          compression-level: 0
