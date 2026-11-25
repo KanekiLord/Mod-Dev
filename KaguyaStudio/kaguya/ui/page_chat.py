@@ -7,7 +7,7 @@ import re
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QTextOption
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QScrollArea, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from . import theme
@@ -315,6 +315,7 @@ class Composer(Card):
     mic = Signal(bool)
     devices = Signal()
     live = Signal()
+    attach = Signal()
     autonomy = Signal(bool)
     desktop = Signal(bool)
 
@@ -330,6 +331,10 @@ class Composer(Card):
         self.edit.installEventFilter(self)
         self.edit.setAccessibleName("Mensagem")
         self.lay.addWidget(self.edit)
+        self.attachments: list[dict] = []          # {"name", "text", "image"} approved in the preview
+        self.attach_row = QHBoxLayout()
+        self.attach_row.setSpacing(6)
+        self.lay.addLayout(self.attach_row)
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(label("Destino", "dim"))
@@ -356,6 +361,10 @@ class Composer(Card):
         self.live_btn.setIcon(theme.icon("wave", C["violet"]))
         self.live_btn.clicked.connect(self.live.emit)
         row.addWidget(self.live_btn)
+        self.attach_btn = button("Anexar", "file", "ghost", "Anexar arquivos (log, código, Word, Excel, PowerPoint, PDF, "
+                                 "ZIP/JAR, imagem): o Studio lê, mostra a prévia e só envia o que você aprovar")
+        self.attach_btn.clicked.connect(self.attach.emit)
+        row.addWidget(self.attach_btn)
         row.addWidget(self.mic_btn)
         row.addWidget(self.dev_btn)
         row.addWidget(self.speak_btn)
@@ -548,3 +557,59 @@ def verdict_md(raw: str) -> str:
     if not v.get("parsed", True):
         lines.append("\n*(o revisor não devolveu um veredito estruturado — tratado como pendente)*")
     return "\n".join(lines)
+
+
+def _chip(text: str, on_remove) -> QWidget:
+    w = QWidget()
+    lay = QHBoxLayout(w)
+    lay.setContentsMargins(8, 2, 4, 2)
+    lay.setSpacing(4)
+    lab = QLabel("📎 " + text)
+    lab.setStyleSheet(f"color: {C['text']};")
+    x = QPushButton("×")
+    x.setFixedSize(18, 18)
+    x.setToolTip("Remover anexo")
+    x.setStyleSheet(f"QPushButton {{ border: none; color: {C['muted']}; }} QPushButton:hover {{ color: {C['danger']}; }}")
+    x.clicked.connect(on_remove)
+    lay.addWidget(lab)
+    lay.addWidget(x)
+    w.setStyleSheet(f"background: {C['surface2']}; border-radius: 9px;")
+    return w
+
+
+def _composer_add_attachment(self, item: dict):
+    self.attachments.append(item)
+    self._render_attachments()
+
+
+def _composer_remove_attachment(self, item: dict):
+    if item in self.attachments:
+        self.attachments.remove(item)
+    self._render_attachments()
+
+
+def _composer_render_attachments(self):
+    while self.attach_row.count():
+        it = self.attach_row.takeAt(0)
+        if it.widget():
+            it.widget().deleteLater()
+    for item in self.attachments:
+        self.attach_row.addWidget(_chip(item["name"], lambda _=False, i=item: self.remove_attachment(i)))
+    if self.attachments:
+        self.attach_row.addStretch(1)
+
+
+def _composer_take_attachments(self) -> tuple[str, list[str], str]:
+    """(context for the assistant, image files, short label) — and clears the list."""
+    items, self.attachments = self.attachments, []
+    self._render_attachments()
+    context = "\n\n".join(i["text"] for i in items if i.get("text"))
+    images = [i["image"] for i in items if i.get("image")]
+    label = ", ".join(i["name"] for i in items)
+    return context, images, label
+
+
+Composer.add_attachment = _composer_add_attachment
+Composer.remove_attachment = _composer_remove_attachment
+Composer._render_attachments = _composer_render_attachments
+Composer.take_attachments = _composer_take_attachments

@@ -47,6 +47,17 @@ def main(exe: str, out_png: str) -> int:
     assert "browser_click" in [t["name"] for t in rb[2]["result"]["tools"]]
     assert rb[3]["result"]["isError"]
     print("servidor do navegador no .exe: OK (sem ponte, recusa corretamente)")
+    # Leitor Universal in its own process, from the same .exe
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        log = os.path.join(tmp, "latest.log")
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(["[INFO] ok"] * 50 + ["[ERROR] java.lang.NullPointerException em ClonePower"]))
+        r = subprocess.run([exe, "--ler-arquivo", log], capture_output=True, timeout=120)
+        res = json.loads(r.stdout.decode("utf-8").strip().splitlines()[-1])
+        assert res["kind"] == "log" and any("NullPointerException" in p["text"] for p in res["pieces"]), res
+    print("leitor universal no .exe: OK")
     return 0
 
 

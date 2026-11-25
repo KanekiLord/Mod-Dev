@@ -13,11 +13,11 @@ Estados: **validado_no_windows** (CI Windows real) · **validado_em_teste_local*
 | M03 | Equipe: implementa → testa → revisa → corrige | validado_em_teste_local | `orchestrator/engine.py::_run_team` · `test_engine` | — |
 | M04 | Paralelo isolado por worktrees | validado_em_teste_local | `orchestrator/worktree.py` · `test_engine` | — |
 | M05 | Ler/pesquisar notas existentes | validado_em_teste_local | `vault/index.py` (FTS5 incremental, exclusões sensíveis) | — |
-| M06 | Staging e registro de conhecimentos | parcial | `vault/outbox.py` (rascunho fora do vault, aprovação, nunca sobrescreve) | **Etapa D**: frontmatter da spec 08, status/confiança/fonte/versão |
-| M07 | Busca incremental e deduplicação | parcial | hash + títulos parecidos em `outbox.py`/`index.py` | **Etapa D**: "propor atualização" de nota existente em vez de duplicar |
-| M08 | Validação e reuso entre agentes | parcial | aprendizados extraídos das tarefas → rascunhos; `memory_for` injeta trechos | **Etapa D**: revalidação (notas antigas/obsoletas), divergências |
-| M09 | Ler PDF/Office/ZIP/logs/imagens | parcial | as CLIs leem arquivos; não há leitor próprio do Studio | **Etapa D**: Leitor Universal (Office/ZIP seguros, trechos, limites) |
-| M10 | Observar janela autorizada | parcial | "Usar o PC": captura só da janela permitida, Parar, failsafe (`desktop/`) · CI real | indicador "Observação ativa" unificado (Etapa D) |
+| M06 | Staging e registro de conhecimentos | **feito (5.7.0)** | `vault/outbox.py` (rascunho fora do vault, aprovação, nunca sobrescreve) | **Etapa D**: frontmatter da spec 08, status/confiança/fonte/versão |
+| M07 | Busca incremental e deduplicação | **feito (5.7.0)** | hash + títulos parecidos em `outbox.py`/`index.py` | **Etapa D**: "propor atualização" de nota existente em vez de duplicar |
+| M08 | Validação e reuso entre agentes | **feito (5.7.0)** | aprendizados extraídos das tarefas → rascunhos; `memory_for` injeta trechos | **Etapa D**: revalidação (notas antigas/obsoletas), divergências |
+| M09 | Ler PDF/Office/ZIP/logs/imagens | **feito (5.7.0)** | as CLIs leem arquivos; não há leitor próprio do Studio | **Etapa D**: Leitor Universal (Office/ZIP seguros, trechos, limites) |
+| M10 | Observar janela autorizada | **indicador feito (5.7.0)**; observação contínua de app por acessibilidade: não feita | "Usar o PC": captura só da janela permitida, Parar, failsafe (`desktop/`) · CI real | indicador "Observação ativa" unificado (Etapa D) |
 | M11 | Navegador com abas e favoritos | **feito (5.5.0)** | só ChatGPT/Claude embutidos (`page_webchats.py`) | **Etapa C**: Kaguya Browser |
 | M12 | Aba compartilhada com agente | **feito (5.5.0)** | — | **Etapa C** |
 | M13 | Ação supervisionada, um controlador por aba | **feito (5.5.0)** | ("Usar o PC" já controla tela inteira com confirmação) | Etapa C (após M12) |

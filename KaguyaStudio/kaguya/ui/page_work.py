@@ -347,8 +347,13 @@ class MemoryPage(QWidget):
         ok.clicked.connect(self.approve)
         dis = button("Descartar", "trash", "ghost")
         dis.clicked.connect(self.discard)
-        orow.addWidget(label("Notas novas são criadas sem sobrescrever nenhum arquivo existente.", "muted"))
+        orow.addWidget(label("Notas novas nunca sobrescrevem nada; atualizações só acrescentam, com backup e prévia.",
+                             "muted"))
         orow.addStretch(1)
+        rev = button("Revisão do conhecimento", "refresh", "ghost",
+                     "Notas antigas, sem fonte, links quebrados e duplicadas — só relatório; mudanças viram propostas")
+        rev.clicked.connect(self.knowledge_review)
+        orow.addWidget(rev)
         orow.addWidget(dis)
         orow.addWidget(ok)
         ol.addLayout(orow)
@@ -461,22 +466,40 @@ class MemoryPage(QWidget):
         self.drafts.clear()
         ob = self.win.engine.outbox(self.win.pid) if self.win.pid is not None else None
         if not ob:
-            self.draft_view.setPlainText("Vincule um vault para revisar rascunhos.")
+            self.draft_view.setPlainText("Selecione um projeto para revisar rascunhos.")
             return
         for d in ob.drafts():
             warn = "  ⚠ título parecido já existe" if d["similar"] else ""
-            it = QListWidgetItem(f"[{d['kind']}] {d['title']}{warn}")
+            if d.get("stale"):
+                warn += "  ⚠ a nota mudou depois da proposta"
+            it = QListWidgetItem(f"[{d.get('label', d['kind'])}] {d['title']}{warn}")
             it.setData(Qt.UserRole, d)
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Unchecked)
             self.drafts.addItem(it)
         if not self.drafts.count():
             self.draft_view.setPlainText("Nenhum rascunho pendente.")
+        elif ob.root is None:
+            self.draft_view.setPlainText("Estas propostas estão guardadas na fila. Conecte o Segundo Cérebro (acima) "
+                                         "para aprová-las.")
 
     def preview(self, cur, _prev=None):
         if not cur:
             return
         d = cur.data(Qt.UserRole)
+        if d.get("diff") or d["kind"] in ("atualizacao", "divergencia", "revalidar"):
+            import html as _html
+            rows = []
+            for line in (d.get("diff") or "(a nota não foi encontrada no vault)").splitlines():
+                color = C["success"] if line.startswith("+") and not line.startswith("+++") else \
+                    C["danger"] if line.startswith("-") and not line.startswith("---") else C["muted"]
+                rows.append(f"<span style='color:{color}'>{_html.escape(line)}</span>")
+            stale = ("<p style='color:%s'>⚠ A nota mudou depois desta proposta: aprovar não vai alterar nada. "
+                     "Descarte e gere de novo.</p>" % C["warning"]) if d.get("stale") else ""
+            self.draft_view.setHtml(f"<p><b>{_html.escape(d.get('label', ''))}:</b> <code>{_html.escape(d['relative'])}"
+                                    f"</code> — só acrescenta; antes um backup é guardado.</p>{stale}"
+                                    f"<pre style='white-space:pre-wrap'>{'<br>'.join(rows)}</pre>")
+            return
         extra = ("\n\n---\n⚠ Notas parecidas: " + ", ".join(d["similar"])) if d["similar"] else ""
         self.draft_view.setMarkdown(f"**Destino:** `{d['relative']}`\n\n" + d["body"] + extra)
 
@@ -491,8 +514,46 @@ class MemoryPage(QWidget):
             QMessageBox.information(self, "Rascunhos", "Marque os rascunhos que deseja criar no vault.")
             return
         done = ob.approve(names)
-        self.win.toast(f"{len(done)} nota(s) criadas no vault (nenhuma sobrescrita).")
+        if ob.last_error:
+            QMessageBox.information(self, "Segundo Cérebro", ob.last_error)
+        self.win.toast(f"{len(done)} nota(s) gravadas no vault (nada sobrescrito; atualizações com backup).")
+        idx = self.win.engine.vault_index(self.vault())
+        if idx and done:
+            idx.update()   # the next task already finds what was just approved
         self.refresh()
+
+    def knowledge_review(self, show: bool = True) -> dict | None:
+        from ..vault.knowledge import review
+        idx = self.win.engine.vault_index(self.vault())
+        if idx is None:
+            QMessageBox.information(self, "Revisão do conhecimento", "Conecte o Segundo Cérebro primeiro.")
+            return None
+        idx.update()
+        rep = review(idx, int(self.win.store.get_setting("knowledge.max_age_days", 180)))
+        if not show:
+            return rep
+        lines = [f"{rep['total']} notas verificadas (nada foi alterado).", ""]
+        sections = (("Antigas (mais de %d dias sem validar)" % rep["limite_dias"],
+                     [f"{o['path']}  ({o['data']}{', ' + o['versao'] if o['versao'] else ''})" for o in rep["antigas"]]),
+                    ("Marcadas para revalidar", rep["a_revalidar"]),
+                    ("Aprendizados/pesquisas sem fonte", rep["sem_fonte"]),
+                    ("Links quebrados", [f"{b['path']} → [[{b['link']}]]" for b in rep["links_quebrados"]]),
+                    ("Títulos duplicados", [" | ".join(d) for d in rep["duplicadas"]]))
+        for title, items in sections:
+            lines.append(f"{title}: {len(items)}")
+            lines += [f"   • {x}" for x in items[:25]]
+        box = QMessageBox(self)
+        box.setWindowTitle("Revisão do conhecimento")
+        box.setText("\n".join(lines[:200]))
+        propose = box.addButton("Propor revalidar as antigas", QMessageBox.AcceptRole) if rep["antigas"] else None
+        box.addButton("Fechar", QMessageBox.RejectRole)
+        box.exec()
+        if propose is not None and box.clickedButton() is propose:
+            ob = self.win.engine.outbox(self.win.pid)
+            n = sum(1 for o in rep["antigas"] if ob.propose_revalidation(o["path"], f"sem validação desde {o['data']}"))
+            self.win.toast(f"{n} proposta(s) de revalidação na fila (só mudam o status, depois da sua aprovação).")
+            self.refresh()
+        return rep
 
     def discard(self):
         ob = self.win.engine.outbox(self.win.pid)

@@ -1,5 +1,41 @@
 # Changelog
 
+## 5.7.0 — 25/11/2026 (Etapa D: Leitor Universal + motor de conhecimento)
+
+### Novo — Leitor Universal (botão **Anexar** na Conversa)
+- O Studio lê: texto, código, Markdown, JSON/YAML/CSV, **logs** (só as linhas de erro com contexto e o fim do
+  arquivo, com números de linha), **Word** (títulos, parágrafos, tabelas), **Excel** (valores e **fórmulas como
+  texto**, nunca calculadas), **PowerPoint** (slides e notas), **PDF** (camada de texto; escaneado é avisado),
+  **ZIP/JAR/APK** (só o índice; mods de Minecraft mostram `mods.toml`/`fabric.mod.json`/`mcmod.info`, quantas classes
+  e pacotes) e imagens (dimensões; a imagem vai anexada para a IA ver).
+- Segurança: formato reconhecido pela assinatura; **macros nunca executadas**; ZIP **nunca extraído** — avisa caminhos
+  que escapam da pasta (zip slip), compressão suspeita (zip bomb) e programas dentro; XML com entidades (ataque) não é
+  lido; `.env`, chaves, credenciais e programas `.exe` são recusados; leitura em **processo separado com tempo
+  máximo** (arquivo hostil não trava o Studio); fora das pastas autorizadas, nega (inclusive por atalho/symlink).
+- **Prévia antes de enviar**: você vê exatamente o que vai, pode apagar qualquer parte; "só os trechos relevantes"
+  para a sua pergunta e "ocultar o que parece senha/token" já vêm ligados. Vai para a IA como **dado**, cercado.
+  Ex.: um log de 4.000 linhas virou 939 caracteres com o crash exato.
+
+### Novo — motor de conhecimento (Segundo Cérebro)
+- Notas no formato da spec 08: `tipo, projeto, tema, fonte_url, fonte_tipo, coletado_em, status, confianca,
+  versao_contexto, encontrado_por` — a versão (ex.: "Forge 1.20.1", "GeckoLib 4.4") é detectada sozinha nos
+  aprendizados das IAs.
+- **Atualizar em vez de duplicar**: mesma fonte ou conteúdo já presente numa nota vira proposta de **acrescentar**
+  àquela nota, com **diff colorido**; aprovar faz **backup** e só acrescenta (escrita atômica). Se a nota mudou depois
+  da proposta, nada é alterado. Repetir a mesma pesquisa não cria nada ("já registrado").
+- **Divergência**: versão diferente da que a nota registrava vira seção "⚠ Divergência" com as duas — nada é
+  substituído.
+- **Revisão do conhecimento** (botão no Segundo Cérebro): notas antigas sem validação, marcadas para revalidar, sem
+  fonte, links quebrados e títulos duplicados — só relatório; "Propor revalidar as antigas" muda **só** o status,
+  depois da sua aprovação.
+- A memória enviada às IAs agora diz quanto confiar em cada nota (status, confiança, versão, fonte, data) e avisa
+  quando ela precisa ser revalidada; as IAs são instruídas a citar o caminho da nota.
+- **Sem vault conectado**, os aprendizados ficam na fila e podem ser aprovados depois de conectar.
+
+### Novo — Observação ativa
+- Indicador no topo que só aparece quando alguma IA pode ver ou ouvir algo (abas compartilhadas/controladas,
+  microfone do Live ou da escuta por nome, controle do PC), com menu para parar cada um.
+
 ## 5.6.0 — 25/11/2026 (Live com chibis + Kaguya V3)
 
 ### Novo

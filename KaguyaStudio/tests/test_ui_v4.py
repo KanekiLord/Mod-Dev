@@ -1069,6 +1069,101 @@ class BrowserControlUi(UiBase):
         self.assertIsNone(w.browser.bridge.tokens.agent(env["KAGUYA_BROWSER_TOKEN"]))   # dead after the task
 
 
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class AttachUi(UiBase):
+    def test_attach_log_preview_hides_secrets_and_sends_only_relevant_lines(self):
+        from kaguya.ui.attach import AttachDialog
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        lines = [f"[INFO] carregando {i}" for i in range(3000)]
+        lines[2000] = "[ERROR] Falha ao iniciar: java.lang.NullPointerException em ClonePower.tick"
+        lines[2001] = "config: api_key=sk-proj-abcdefghijklmnop1234567890"
+        log = Path(self.tmp.name) / "latest.log"
+        log.write_text("\n".join(lines), encoding="utf-8")
+        shown = []
+
+        class AutoOk(AttachDialog):
+            def exec(self):
+                shown.append(self)
+                return 1
+        w.chat.composer.edit.setPlainText("por que o ClonePower crasha?")
+        w.attach_files([str(log)], dialog=AutoOk)
+        self.assertTrue(self.pump(lambda: w.chat.composer.attachments, 30))
+        att = w.chat.composer.attachments[0]
+        self.assertIn("ClonePower.tick", att["text"])
+        self.assertIn("linhas 1998–", att["text"])
+        self.assertNotIn("abcdefghijklmnop1234567890", att["text"])            # hidden in the preview
+        self.assertLess(len(att["text"]), 3000)
+        self.assertTrue(shown[0].only_relevant.isChecked())
+        self.assertTrue(w.send_message("por que o ClonePower crasha?", "claude", ""))
+        task = self.store.tasks(pid)[0]
+        self.assertIn("📎 Anexos: latest.log", task["title"])
+        self.assertIn("ClonePower.tick", task["context"])
+        self.assertEqual(w.chat.composer.attachments, [])                       # used once, then cleared
+        # a sensitive file never gets an "Anexar" button
+        env = Path(self.tmp.name) / ".env"
+        env.write_text("TOKEN=1", encoding="utf-8")
+        from kaguya.reader import read
+        from PySide6.QtWidgets import QDialogButtonBox
+        dlg = AttachDialog(w, read(env))
+        self.addCleanup(dlg.deleteLater)
+        self.assertFalse(dlg.buttons.button(QDialogButtonBox.Ok).isEnabled())
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class KnowledgeUi(UiBase):
+    def test_update_proposal_diff_approve_and_review(self):
+        (self.vault / "conhecimento").mkdir()
+        note = self.vault / "conhecimento" / "geckolib.md"
+        note.write_text("---\ntipo: pesquisa\nfonte_url: https://geckolib.com/docs\ncoletado_em: 2025-01-01\n---\n"
+                        "# GeckoLib\nRegistre o renderer no evento certo.\n", encoding="utf-8")
+        self.store.set_global_vault(self.vault)
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        idx = w.engine.vault_index(str(self.vault))
+        idx.update()
+        ob = w.engine.outbox(pid)
+        ob.stage("pesquisa", "GeckoLib", "Na 4.4 o renderer vai em RegisterRenderers.",
+                 source_url="https://geckolib.com/docs", found_by="Miwa (Claude Code)")
+        w.go("memory")
+        page = w.memory
+        self.assertEqual(page.drafts.count(), 1)
+        it = page.drafts.item(0)
+        self.assertIn("[Atualizar nota existente]", it.text())
+        page.preview(it)
+        self.assertIn("RegisterRenderers", page.draft_view.toPlainText())
+        self.assertIn("backup", page.draft_view.toPlainText())
+        from PySide6.QtCore import Qt
+        it.setCheckState(Qt.Checked)
+        page.approve()
+        text = note.read_text(encoding="utf-8")
+        self.assertIn("Registre o renderer no evento certo.", text)
+        self.assertIn("Na 4.4 o renderer vai em RegisterRenderers.", text)
+        rep = page.knowledge_review(show=False)
+        self.assertIn("conhecimento/geckolib.md", [o["path"] for o in rep["antigas"]])
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git") and _webengine(), "PySide6 WebEngine e git necessários")
+class ObservationUi(UiBase):
+    def test_indicator_lists_what_is_shared_and_stops_it(self):
+        w = self.window()
+        w.go("browser")
+        w.refresh_observation()
+        self.assertTrue(w.observe_btn.isHidden())                         # nothing observed: no indicator
+        w.browser.set_share("claude", True)
+        w.browser.set_control("claude", True)
+        w.refresh_observation()
+        self.assertFalse(w.observe_btn.isHidden())
+        self.assertIn("(1)", w.observe_btn.text())
+        self.assertIn("Miwa vê 1 aba(s) do navegador, controla 1", w.observe_btn.toolTip())
+        stop = next(a for a in w.observe_menu.actions() if a.text().startswith("Parar de compartilhar"))
+        stop.trigger()
+        self.assertTrue(w.observe_btn.isHidden())
+        self.assertEqual(w.browser.shares.shared_tabs(), [])
+
+
 def tearDownModule():
     """Destroy every top-level window while QApplication still exists (Qt objects that survive until
     interpreter shutdown are destroyed in arbitrary order, which can crash at exit)."""

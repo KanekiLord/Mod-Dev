@@ -8,7 +8,7 @@ import time
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QSizePolicy, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QScrollArea,
+from PySide6.QtWidgets import (QAbstractButton, QMenu, QButtonGroup, QSizePolicy, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QScrollArea,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import VERSION
@@ -159,6 +159,9 @@ class MainWindow(QMainWindow):
         self._later(2500, lambda: run_bg(self.refresh_github_status))
         if self.store.get_setting("wake.enabled", False) and self.store.get_setting("wake.consent", False):
             self._later(4000, lambda: self.set_wake(True))  # the user left the name listener on
+        self._observe_timer = QTimer(self, interval=1000)
+        self._observe_timer.timeout.connect(self.refresh_observation)
+        self._observe_timer.start()
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -202,6 +205,14 @@ class MainWindow(QMainWindow):
         self.pause_btn = button("Pausar tudo", "pause", "danger", "Para todas as IAs, o controle do PC, o Live, a escuta "
                                 "por nome e a fala — na hora (Ctrl+Shift+Pause)")
         self.pause_btn.clicked.connect(self.pause_all)
+        # "Observação ativa": one place that says what the assistants can see/hear right now, with a way to stop it
+        self.observe_btn = button("", "eye", None, "O que as IAs podem ver ou ouvir agora")
+        self.observe_btn.setStyleSheet(f"QPushButton {{ background: {C['gold_bg']}; border: 1px solid {C['gold']};"
+                                       f" border-radius: 10px; color: {C['gold']}; padding: 4px 10px; }}")
+        self.observe_menu = QMenu(self.observe_btn)
+        self.observe_btn.setMenu(self.observe_menu)
+        self.observe_btn.hide()
+        self.header.right.addWidget(self.observe_btn)
         self.header.right.addWidget(self.pause_btn)
         self.header.right.addWidget(Pill(f"v{VERSION}", C["gold"]))
         v.addWidget(self.header)
@@ -254,6 +265,7 @@ class MainWindow(QMainWindow):
         c.mic.connect(lambda on: self.voice.ptt(on))
         c.devices.connect(self.devices_menu)
         c.live.connect(lambda: self.start_live(None))
+        c.attach.connect(lambda: self.attach_files())
         c.autonomy.connect(self.set_autonomy)
         c.desktop.connect(self.set_desktop_use)
 
@@ -820,9 +832,13 @@ class MainWindow(QMainWindow):
                                     "pode ser reenfileirada.") == QMessageBox.Yes:
                 self.engine.cancel(self.pid)
                 self.engine.wait(self.pid, 15)
+        context, images, names = self.chat.composer.take_attachments() if not quick else ("", [], "")
+        if names:
+            intent.text += f"\n\n📎 Anexos: {names}"
         tid = self.engine.submit(self.pid, intent, write=perms["write"], web=perms["web"], commands=perms["commands"],
                                  mcp=perms["mcp"], run_tests=perms["run_tests"], autonomous=auto,
-                                 desktop=bool(perms.get("desktop")) and intent.kind == "execute")
+                                 desktop=bool(perms.get("desktop")) and intent.kind == "execute",
+                                 context=context, attachments=images)
         self.chat.view.message("user", f"**#{tid} · @{intent.target}**" + (f" · {intent.kind.upper()}" if intent.kind != "execute" else "")
                                + f"  \n{intent.text}")
         if intent.kind == "later":
@@ -835,6 +851,23 @@ class MainWindow(QMainWindow):
             self.chat.composer.edit.clear()
         self.refresh_status()
         return True
+
+    def attach_files(self, paths: list[str] | None = None, dialog=None):
+        """Read files with the Leitor Universal (separate process) and preview them before attaching."""
+        from PySide6.QtWidgets import QFileDialog
+        from ..reader import read_isolated
+        if paths is None:
+            start = self.store.project(self.pid)["directory"] if self.pid is not None else str(Path.home())
+            paths, _ = QFileDialog.getOpenFileNames(self, "Anexar arquivos", start)
+        query = self.chat.composer.edit.toPlainText().strip()
+        for path in paths or []:
+            def done(res, path=path):
+                from .attach import AttachDialog
+                dlg = (dialog or AttachDialog)(self, res, query)
+                if dlg.exec():
+                    self.chat.composer.add_attachment(dlg.item())
+            run_bg(lambda path=path: read_isolated(path), done,
+                   lambda exc, tb: self.toast(f"Não foi possível ler o arquivo: {exc}"))
 
     def bridge_call(self, fn, *args, timeout: float = 5.0):
         """Run ``fn`` on the UI thread from a worker thread and wait for its result (Qt objects live there)."""
@@ -889,6 +922,60 @@ class MainWindow(QMainWindow):
         self.toast("Tudo pausado" + (f": {', '.join(stopped)}." if stopped else " (nada estava rodando).")
                    + " Tarefas interrompidas podem ser reenfileiradas na Fila.", 7000)
         return stopped
+
+    def observations(self) -> list[tuple[str, str]]:
+        """[(what, kind)] the assistants can currently see or hear. kind: abas | microfone | tela"""
+        out = []
+        b = getattr(self, "browser", None)
+        if b is not None:
+            for a in ("codex", "claude"):
+                tabs = b.shares.shared_tabs(a)
+                own = [t for t in tabs if b.shares.tab(t).owner == a]
+                user_tabs = [t for t in tabs if t not in own]
+                ctl = [t for t in user_tabs if a in b.shares.tab(t).controllers]
+                if user_tabs:
+                    out.append((f"{AGENT[a]['mascot']} vê {len(user_tabs)} aba(s) do navegador"
+                                + (f", controla {len(ctl)}" if ctl else ""), "abas"))
+        if self.live_session is not None:
+            out.append(("Microfone aberto: Modo Live", "microfone"))
+        if getattr(self, "wake", None) is not None and self.wake.running:
+            out.append(("Microfone aberto: escuta por nome (Kaguya/Miwa)", "microfone"))
+        if self.desktop_overlay is not None and self.desktop_overlay.isVisible():
+            out.append(("Tela e mouse: uma IA está usando o PC", "tela"))
+        return out
+
+    def refresh_observation(self):
+        if getattr(self, "_detached", False):
+            return
+        items = self.observations()
+        self.observe_btn.setVisible(bool(items))
+        if not items:
+            return
+        self.observe_btn.setText(f" Observação ativa ({len(items)})")
+        self.observe_btn.setIcon(theme.icon("eye", C["gold"]))
+        self.observe_btn.setToolTip("\n".join(t for t, _k in items))
+        self.observe_menu.clear()
+        for text, _k in items:
+            self.observe_menu.addAction(text).setEnabled(False)
+        self.observe_menu.addSeparator()
+        kinds = {k for _t, k in items}
+        if "abas" in kinds:
+            self.observe_menu.addAction("Parar de compartilhar todas as abas",
+                                        lambda: (self.browser.stop_all(), self.browser.revoke_all(),
+                                                 self.refresh_observation()))
+        if "microfone" in kinds:
+            self.observe_menu.addAction("Fechar o microfone (Live e escuta por nome)", self.close_microphone)
+        if "tela" in kinds:
+            self.observe_menu.addAction("Parar o controle do PC", lambda: self.stop_desktop("Observação ativa"))
+        self.observe_menu.addAction("Pausar tudo", self.pause_all)
+
+    def close_microphone(self):
+        if self.live_window is not None:
+            self.live_window.close()
+        if self.wake.running:
+            self.wake.stop()
+            self.sync_wake_ui()
+        self.refresh_observation()
 
     def stop_task(self):
         if self.pid is not None and self.engine.cancel(self.pid):
@@ -1437,7 +1524,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_hotkey", None) is not None:
             self._hotkey.stop()
             self._hotkey = None
-        for t in (self._audio_timer, self._limits_timer, self._timer):
+        for t in (self._audio_timer, self._limits_timer, self._timer, self._observe_timer):
             t.stop()
         if self._listener in self.engine.listeners:
             self.engine.listeners.remove(self._listener)

@@ -33,6 +33,7 @@ from ..prompts import attached_context, fix_prompt, parse_verdict, review_prompt
 from ..quality import Check, run_checks, summarize, tests_passed
 from ..store import Store
 from ..vault.index import VaultIndex, context_block
+from ..vault.knowledge import detect_version
 from ..vault.outbox import Outbox, extract_learnings
 from . import worktree
 
@@ -153,11 +154,12 @@ class Engine:
                 self._indexes[vault] = idx
         return idx
 
-    def outbox(self, pid: int) -> Outbox | None:
+    def outbox(self, pid: int) -> Outbox:
+        """Review queue. Without a connected vault it still queues proposals (approved once the vault is linked)."""
         vault = self.store.effective_vault(pid)
         if not vault or not Path(vault).is_dir():
-            return None
-        return Outbox(Path(vault), self.home / "outbox", self.vault_index(vault))
+            return Outbox(None, self.home / "outbox", None, self.home / "backups" / "notas")
+        return Outbox(Path(vault), self.home / "outbox", self.vault_index(vault), self.home / "backups" / "notas")
 
     def memory_for(self, pid: int, text: str) -> str:
         idx = self.vault_index(self.store.effective_vault(pid))
@@ -171,6 +173,9 @@ class Engine:
                        if any(k in h.path.lower() for k in ("lesson", "licao", "lição", "erro", "aprendiz"))]
             seen = {h.path for h in hits}
             hits += [h for h in lessons if h.path not in seen]
+            from ..vault.knowledge import context_meta
+            for h in hits:   # tell the assistant how much to trust each note (status, confidence, version, source)
+                h.meta = context_meta(idx.note(h.path) or "")
         except Exception as exc:  # index problems must not block the task
             self.emit("log", message=f"Busca no Segundo Cérebro falhou: {exc}")
             return ""
@@ -476,14 +481,19 @@ class Engine:
         if not items:
             return
         ob = self.outbox(pid)
-        if ob is None:
-            self.store.append_event(tid, "system", f"{len(items)} aprendizado(s) não registrados: vault não vinculado.")
-            return
         proj = self.store.project(pid)["name"]
+        counts: dict[str, int] = {}
+        who = {"codex": "Kaguya (Codex)", "claude": "Miwa (Claude Code)"}.get(agent, agent)
         for kind, item in items:
-            ob.stage(kind, item[:90], item, project=proj, source=f"{agent} • tarefa #{tid}",
-                     evidence=f"Extraído da resposta do {agent} na tarefa #{tid}.")
-        self.store.append_event(tid, "system", f"{len(items)} aprendizado(s)/erro(s) enviados para revisão no Segundo Cérebro.")
+            ob.stage(kind, item[:90], item, project=proj, source=f"{agent} • tarefa #{tid}", found_by=who,
+                     version=detect_version(item), evidence=f"Extraído da resposta do {agent} na tarefa #{tid}.")
+            counts[ob.last_status] = counts.get(ob.last_status, 0) + 1
+        parts = [f"{n} {w}" for w, n in (("nova(s)", counts.get("novo", 0)),
+                                          ("atualização(ões) de nota existente", counts.get("atualizacao", 0)),
+                                          ("divergência(s)", counts.get("divergencia", 0)),
+                                          ("já registrada(s)", counts.get("duplicado", 0))) if n]
+        where = "para revisão no Segundo Cérebro" if ob.root else "na fila (vault não conectado; aprove depois de conectar)"
+        self.store.append_event(tid, "system", f"Aprendizados {where}: " + ", ".join(parts) + ".")
         self.emit("learning", pid=pid, task_id=tid, count=len(items))
 
     def _common(self, pid: int, task: dict) -> dict:

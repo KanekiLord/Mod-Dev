@@ -867,12 +867,14 @@ class BrowserPage(QWidget):
         pid = self._project()
         ob = self.win.engine.outbox(pid) if pid is not None else None
         if ob is None:
-            self.win.toast("Conecte o Segundo Cérebro (Obsidian) para criar notas.")
             return None
         summary = self.last_answer.get(tab_id, "")
         note = ob.stage("pesquisa", rep.meta.get("title") or rep.url, yt.note_markdown(rep, summary),
                         source=rep.url, project=self.win.store.project(pid)["name"])
-        self.win.toast(f"Nota em revisão no Segundo Cérebro: {note.name}")
+        where = "em revisão no Segundo Cérebro" if ob.root else "na fila (conecte o Segundo Cérebro para aprovar)"
+        what = {"atualizacao": "Proposta de atualizar uma nota que já existe", "divergencia": "Divergência registrada",
+                "duplicado": "Este vídeo já está no Segundo Cérebro"}.get(ob.last_status, "Nota")
+        self.win.toast(f"{what} — {where}: {note.name}")
         return note
 
     # ------------------------------------------------------------ browser tools (called through the bridge)

@@ -27,6 +27,24 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Etapa D — 5.7.0 (Leitor Universal + conhecimento)
+
+- `test_reader.py` (arquivos reais gerados por python-docx/openpyxl/python-pptx, PDF montado à mão): log de 5.000
+  linhas → só o trecho do erro com número de linha (menos de 1/20 do arquivo); JSON/CSV/Windows-1252; `.env`, chaves,
+  `.ssh`, `.exe` recusados; pasta vizinha "NarutoCD2" e atalho para fora negados; zip slip, zip bomb, script dentro e
+  XML com entidades **detectados sem extrair nada**; `.jar` de mod com `mods.toml` e classes; Word com título/tabela e
+  `.docm` com macro avisada; Excel com fórmula como texto; PowerPoint com notas; PDF com e **sem pypdf** (o
+  instalador não tem pypdf); imagem; processo separado e tempo máximo.
+- `test_knowledge.py`: propriedades da spec 08; mesma fonte → atualização com backup idêntico ao original e sem nota
+  duplicada; repetição exata não gera nada; conteúdo já conhecido → atualização; versão diferente → divergência com
+  as duas; nota editada depois da proposta → nada muda; fila sem vault aprovada depois; relatório (antigas, link
+  quebrado, sem fonte, duplicadas) e revalidação que muda **só** o status; **Kaguya registra e a Miwa recupera em
+  outra sessão/banco** com caminho, versão, fonte e status; detecção de versão.
+- `test_ui_v4.py`: `AttachUi` (anexo de log pela Conversa: prévia com só o trecho relevante, token oculto, tarefa com
+  o anexo, anexo limpo depois; arquivo sensível sem botão Anexar), `KnowledgeUi` (proposta com diff, aprovar, relatório)
+  e `ObservationUi` (indicador aparece com aba compartilhada/controlada e "Parar de compartilhar" some com ele).
+- CI Windows: o `.exe` também lê um log com `--ler-arquivo`.
+
 ## Live com chibis — 5.6.0
 
 - `test_ui_v4.py › LiveUi`: a conversa completa do Live (Claude falso) roda igual com a **janela grande e com o chibi**;

@@ -1,16 +1,26 @@
-"""Outbox: new notes are drafted outside the vault, reviewed, then created (never overwritten).
+"""Outbox: knowledge is proposed outside the vault, reviewed, then written — never silently overwritten.
 
-Drafts carry source/evidence front-matter; duplicates are detected by content hash and by
-similar titles already present in the vault index.
+* A NEW note is created with the properties of spec 08 (tipo, projeto, fonte_url, coletado_em, status, confiança,
+  versão, encontrado_por) and only if the file does not exist (create-only).
+* When the vault already has the same source, or a note that already says most of it, the proposal becomes an
+  UPDATE of that note: approving appends a dated section, after a backup, and only if the note did not change since
+  the proposal was made. If the versions differ, it is a DIVERGÊNCIA (both stay visible, nothing is replaced).
+* The exact same content again is not staged at all ("já registrado").
+* Without a connected vault, proposals still queue up; they can be approved once the vault is linked.
 """
 from __future__ import annotations
 
 from datetime import datetime
+import difflib
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import unicodedata
+
+from .knowledge import norm_text, overlap, parse_frontmatter, set_property
 
 CATEGORIES = {
     "aprendizado": Path("memoria/agentes/kaguya-studio"),
@@ -19,6 +29,10 @@ CATEGORIES = {
     "ideia": Path("memoria/agentes/kaguya-studio/ideias"),
     "decisao": Path("projetos/kaguya-studio/decisoes"),
 }
+PROPOSALS = {"atualizacao": "Atualizar nota existente", "divergencia": "Divergência com nota existente",
+             "revalidar": "Marcar para revalidar"}
+LABELS = {**{k: "Nova nota" for k in CATEGORIES}, **PROPOSALS}
+SAME_CONTENT = 0.6      # share of the new text already present in an existing note → update, not a new note
 
 
 def slug(text: str) -> str:
@@ -27,36 +41,134 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")[:70] or "nota"
 
 
+def _hash(text: str) -> str:
+    return sha256(text.encode("utf-8")).hexdigest()
+
+
+def _q(v: str) -> str:
+    return json.dumps(v, ensure_ascii=False)
+
+
 class Outbox:
-    def __init__(self, vault: Path, staging: Path, index=None):
-        self.root = Path(vault).resolve()
+    def __init__(self, vault: Path | None, staging: Path, index=None, backups: Path | None = None):
+        self.root = Path(vault).resolve() if vault else None
         self.staging = Path(staging).resolve()
         self.staging.mkdir(parents=True, exist_ok=True)
+        self.backups = Path(backups) if backups else self.staging.parent / "backups" / "notas"
         self.index = index
+        self.last_status = ""      # "novo" | "atualizacao" | "divergencia" | "duplicado"
+        self.last_error = ""
+
+    # ------------------------------------------------------------------ staging
+    def _existing(self, title: str, body: str, source_url: str) -> tuple[str, str] | None:
+        """(path, text) of a vault note that already covers this, if any."""
+        if self.index is None or self.root is None:
+            return None
+        best, best_score = None, 0.0
+        similar = set(self.index.find_similar_title(title))
+        for rel, _t, text in self.index.bodies():
+            fm = parse_frontmatter(text)
+            if source_url and fm.get("fonte_url") == source_url:
+                return rel, text
+            score = overlap(body, text)
+            if rel in similar:
+                score += 0.25
+            if score > best_score:
+                best, best_score = (rel, text), score
+        return best if best_score >= SAME_CONTENT else None
 
     def stage(self, kind: str, title: str, body: str, *, source: str = "kaguya-studio", project: str = "",
-              evidence: str = "", links: list[str] | None = None) -> Path:
+              evidence: str = "", links: list[str] | None = None, source_url: str = "", source_type: str = "",
+              version: str = "", found_by: str = "", theme: str = "", confidence: str = "a_verificar") -> Path:
         if kind not in CATEGORIES:
             raise ValueError("Categoria não suportada")
         title = " ".join(title.split())[:140] or "Sem título"
-        created = datetime.now().astimezone().isoformat(timespec="seconds")
-        fm = ["---", f"tipo: {kind}", "origem: kaguya-studio", f"fonte: {json.dumps(source, ensure_ascii=False)}",
-              f"criado: {created}", "status: revisao"]
-        if project:
-            fm.append(f"projeto: {json.dumps(project, ensure_ascii=False)}")
-        fm.append("---")
-        link_line = ("\n\nRelacionado: " + " ".join(f"[[{l}]]" for l in links)) if links else ""
+        now = datetime.now().astimezone()
+        created = now.isoformat(timespec="seconds")
+        body = body.strip()[:30000]
+        if not source_url:
+            m = re.search(r"https?://[^\s)>\]]+", body + " " + source)
+            source_url = m.group(0).rstrip(".,;") if m else ""
+        existing = self._existing(title, body, source_url)
+        if existing and norm_text(body) and norm_text(body) in norm_text(existing[1]):
+            self.last_status = "duplicado"            # already in the vault, word for word
+            return self.root / existing[0]
         ev = f"\n\n## Evidência\n{evidence.strip()[:4000]}" if evidence.strip() else ""
-        content = "\n".join(fm) + f"\n\n# {title}\n\n{body.strip()[:30000]}{ev}{link_line}\n"
-        digest = sha256((kind + title + body.strip()).encode("utf-8")).hexdigest()[:12]
+        link_line = ("\n\nRelacionado: " + " ".join(f"[[{l}]]" for l in links)) if links else ""
+        who = found_by or source
+        if existing:
+            rel, text = existing
+            old_v = parse_frontmatter(text).get("versao_contexto", "")
+            diverge = bool(version and old_v and version.strip() != old_v.strip())
+            kind2 = "divergencia" if diverge else "atualizacao"
+            head = (f"## ⚠ Divergência {now:%Y-%m-%d} — {who}\nEsta nota registrava **{old_v}**; a nova fonte fala de "
+                    f"**{version}**. As duas ficam registradas até alguém verificar." if diverge else
+                    f"## Atualização {now:%Y-%m-%d} — {who}")
+            extra = "\n".join(x for x in (
+                f"Fonte: {source_url}" if source_url else "", f"Versão: {version}" if version else "",
+                f"Projeto: {project}" if project else "", f"Confiança: {confidence.replace('_', ' ')} · status: em revisão")
+                if x)
+            section = f"\n\n{head}\n\n{body}{ev}\n\n{extra}{link_line}\n"
+            digest = _hash(rel + section)[:12]
+            name = f"{kind2}-{slug(Path(rel).stem)}-{digest}.md"
+            dest = self.staging / name
+            if not dest.exists():
+                dest.write_text(section, encoding="utf-8")
+                meta = {"kind": kind2, "title": f"{Path(rel).stem} ← {title}", "created": created, "target": rel,
+                        "base_hash": _hash(text), "digest": digest, "project": project, "source": source,
+                        "source_url": source_url, "category": kind}
+                (self.staging / (name + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2),
+                                                            encoding="utf-8")
+            self.last_status = kind2
+            return dest
+        fm = ["---", f"tipo: {kind}", "origem: kaguya-studio", f"fonte: {_q(source)}"]
+        if project:
+            fm.append(f"projeto: {_q(project)}")
+        if theme:
+            fm.append(f"tema: {_q(theme)}")
+        if source_url:
+            fm.append(f"fonte_url: {source_url}")
+        if source_type:
+            fm.append(f"fonte_tipo: {source_type}")
+        fm += [f"coletado_em: {now:%Y-%m-%d}", f"criado: {created}", "status: em_revisao", f"confianca: {confidence}"]
+        if version:
+            fm.append(f"versao_contexto: {_q(version)}")
+        if found_by:
+            fm.append(f"encontrado_por: {_q(found_by)}")
+        fm.append("---")
+        content = "\n".join(fm) + f"\n\n# {title}\n\n{body}{ev}{link_line}\n"
+        digest = _hash(kind + title + body)[:12]
         name = f"{slug(title)}-{digest}.md"
         dest = self.staging / name
         if not dest.exists():
             dest.write_text(content, encoding="utf-8")
             meta = {"kind": kind, "title": title, "created": created, "target": CATEGORIES[kind].as_posix(),
-                    "digest": digest, "project": project, "source": source}
+                    "digest": digest, "project": project, "source": source, "source_url": source_url}
             (self.staging / (name + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.last_status = "novo"
         return dest
+
+    def propose_revalidation(self, rel: str, reason: str) -> Path | None:
+        """Ask to mark a note as needing revalidation (only its 'status' property changes, after approval)."""
+        if self.root is None:
+            return None
+        path = (self.root / rel).resolve()
+        if not path.is_file() or not path.is_relative_to(self.root):
+            return None
+        text = path.read_text(encoding="utf-8")
+        digest = _hash(rel + reason)[:12]
+        name = f"revalidar-{slug(Path(rel).stem)}-{digest}.md"
+        (self.staging / name).write_text(f"Motivo: {reason}\n", encoding="utf-8")
+        meta = {"kind": "revalidar", "title": f"Revalidar {Path(rel).stem}", "target": rel, "base_hash": _hash(text),
+                "created": datetime.now().astimezone().isoformat(timespec="seconds"), "reason": reason}
+        (self.staging / (name + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return self.staging / name
+
+    # ------------------------------------------------------------------ review
+    def _result(self, spec: dict, rel: str, current: str, addition: str) -> str:
+        if spec["kind"] == "revalidar":
+            return set_property(current, "status", "necessita_revalidacao")
+        return current.rstrip("\n") + "\n" + addition
 
     def drafts(self) -> list[dict]:
         out = []
@@ -64,14 +176,33 @@ class Outbox:
             try:
                 spec = json.loads(meta.read_text(encoding="utf-8"))
                 file = self.staging / meta.name[:-5]
-                if not file.exists() or spec.get("kind") not in CATEGORIES:
+                kind = spec.get("kind")
+                if not file.exists() or kind not in LABELS:
                     continue
-                dest = self.root / CATEGORIES[spec["kind"]] / file.name
-                similar = self.index.find_similar_title(spec.get("title", "")) if self.index else []
-                out.append({"filename": file.name, "title": spec.get("title", ""), "kind": spec["kind"],
-                            "destination": str(dest), "relative": (CATEGORIES[spec["kind"]] / file.name).as_posix(),
-                            "exists": dest.exists(), "similar": similar, "created": spec.get("created", ""),
-                            "body": file.read_text(encoding="utf-8")})
+                body = file.read_text(encoding="utf-8")
+                item = {"filename": file.name, "title": spec.get("title", ""), "kind": kind, "label": LABELS[kind],
+                        "created": spec.get("created", ""), "body": body, "similar": [], "diff": "", "stale": False,
+                        "source_url": spec.get("source_url", "")}
+                if kind in PROPOSALS:
+                    rel = spec["target"]
+                    item.update(relative=rel, destination=str(self.root / rel) if self.root else "",
+                                exists=True)
+                    cur_path = (self.root / rel) if self.root else None
+                    if cur_path is not None and cur_path.is_file():
+                        cur = cur_path.read_text(encoding="utf-8")
+                        item["stale"] = _hash(cur) != spec.get("base_hash")
+                        new = self._result(spec, rel, cur, body)
+                        item["diff"] = "".join(difflib.unified_diff(cur.splitlines(True), new.splitlines(True),
+                                                                    f"{rel} (atual)", f"{rel} (proposta)", n=2))
+                    else:
+                        item["stale"] = True
+                else:
+                    rel = (CATEGORIES[kind] / file.name).as_posix()
+                    dest = (self.root / rel) if self.root else None
+                    item.update(relative=rel, destination=str(dest) if dest else "",
+                                exists=bool(dest and dest.exists()),
+                                similar=self.index.find_similar_title(spec.get("title", "")) if self.index else [])
+                out.append(item)
             except (OSError, ValueError, KeyError):
                 continue
         return out
@@ -86,7 +217,17 @@ class Outbox:
                 removed = True
         return removed
 
+    def _backup(self, path: Path, rel: str) -> Path:
+        dest = self.backups / f"{rel}.{datetime.now():%Y%m%d-%H%M%S}.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+        return dest
+
     def approve(self, filenames: list[str]) -> list[Path]:
+        self.last_error = ""
+        if self.root is None:
+            self.last_error = "Conecte o Segundo Cérebro (vault) para aprovar: as propostas continuam guardadas."
+            return []
         done = []
         for name in filenames:
             if not isinstance(name, str) or name != Path(name).name or not name.endswith(".md"):
@@ -96,13 +237,29 @@ class Outbox:
                 continue
             try:
                 spec = json.loads(meta.read_text(encoding="utf-8"))
-                folder = (self.root / CATEGORIES[spec["kind"]]).resolve()
-                if not folder.is_relative_to(self.root):
-                    continue
-                folder.mkdir(parents=True, exist_ok=True)
-                dest = folder / name
-                with dest.open("x", encoding="utf-8") as fh:  # create-only: never overwrite
-                    fh.write(src.read_text(encoding="utf-8"))
+                if spec["kind"] in PROPOSALS:
+                    target = (self.root / spec["target"]).resolve()
+                    if not target.is_relative_to(self.root) or not target.is_file():
+                        continue
+                    cur = target.read_text(encoding="utf-8")
+                    if _hash(cur) != spec.get("base_hash"):
+                        self.last_error = (f"“{spec['target']}” mudou depois da proposta: nada foi alterado. "
+                                           "Descarte e gere a proposta de novo.")
+                        continue
+                    self._backup(target, spec["target"])
+                    new = self._result(spec, spec["target"], cur, src.read_text(encoding="utf-8"))
+                    tmp = target.with_name(target.name + ".kaguya-tmp")
+                    tmp.write_text(new, encoding="utf-8")
+                    os.replace(tmp, target)            # atomic: a crash never leaves half a note
+                    dest = target
+                else:
+                    folder = (self.root / CATEGORIES[spec["kind"]]).resolve()
+                    if not folder.is_relative_to(self.root):
+                        continue
+                    folder.mkdir(parents=True, exist_ok=True)
+                    dest = folder / name
+                    with dest.open("x", encoding="utf-8") as fh:  # create-only: never overwrite
+                        fh.write(src.read_text(encoding="utf-8"))
                 src.unlink()
                 meta.unlink()
                 done.append(dest)

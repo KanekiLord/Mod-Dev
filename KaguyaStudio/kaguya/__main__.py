@@ -1,5 +1,9 @@
 import sys
 
+if "--ler-arquivo" in sys.argv[1:]:
+    from kaguya.reader.__main__ import main as read_main
+    raise SystemExit(read_main(sys.argv[sys.argv.index("--ler-arquivo") + 1:]))
+
 if "--mcp-browser" in sys.argv[1:]:
     from kaguya.browser.mcp import serve as serve_browser
     raise SystemExit(serve_browser())
