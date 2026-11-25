@@ -238,7 +238,15 @@ def _seed_demo(store, engine, demo):
 def _capture(app, win, args) -> int:
     from PySide6.QtCore import QTimer
     import faulthandler
-    faulthandler.dump_traceback_later(120, exit=True)  # automated runs must never hang: dump stacks and exit
+    # automated runs must never hang: dump the stacks and exit. The windowed .exe has no stderr, so write to a file.
+    from . import diagnostics as dg
+    try:
+        target = sys.stderr if sys.stderr is not None and sys.stderr.fileno() >= 0 else None
+    except (OSError, ValueError, AttributeError):
+        target = None
+    if target is None:
+        target = open(dg.logs_dir() / "captura_travada.txt", "w", encoding="utf-8")  # noqa: SIM115 (kept open)
+    faulthandler.dump_traceback_later(120, exit=True, file=target)
     w, h = (int(x) for x in args.tamanho.lower().split("x"))
     win.resize(w, h)
     win.show()
