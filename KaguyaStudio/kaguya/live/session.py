@@ -20,7 +20,7 @@ from ..voice.speech import split_sentences
 from .vad import EnergyVAD, RATE
 
 TASK = re.compile(r"\[\[\s*TAREFA\s*:\s*(.+?)\s*\]\]", re.S | re.I)
-NAMES_PROMPT = ("Kaguya, Claude, Codex, Kaguya Studio, Minecraft, Forge, Fabric, NeoForge, Gradle, Blockbench, "
+NAMES_PROMPT = ("Kaguya, Miwa, Claude, Codex, Kaguya Studio, Minecraft, Forge, Fabric, NeoForge, Gradle, Blockbench, "
                 "Obsidian, Segundo Cérebro, NarutoCD, Kodachi, mod, commit, GitHub.")
 
 
@@ -34,7 +34,7 @@ def command_of(text: str) -> tuple[str, str]:
     n = _norm(text)
     if re.search(r"^(encerrar|encerra|sair do (modo )?live|terminar (o )?live|tchau|ate (mais|logo))\b", n):
         return "end", ""
-    if re.search(r"(falar|fala|conversar|passa) com a? ?(claude|clode|cloud)\b|^(claude|cloud)[, ]*$", n):
+    if re.search(r"(falar|fala|conversar|passa) com a? ?(claude|clode|cloud|miwa|miua|mi wa)\b|^(claude|cloud|miwa)[, ]*$", n):
         return "switch", "claude"
     if re.search(r"(falar|fala|conversar|passa) com a? ?(kaguya|kaguia|caguia|codex)\b|^(kaguya|codex)[, ]*$", n):
         return "switch", "codex"
@@ -47,7 +47,8 @@ class LiveSession:
     def __init__(self, *, agent: str, make_conversation: Callable[[str], object], transcribe: Callable[[np.ndarray], str],
                  say: Callable[[str, str], bool], stop_speech: Callable[[], None], speech_busy: Callable[[], bool],
                  on_event: Callable[[dict], None], on_task: Callable[[str, str], None] | None = None,
-                 input_device: int | None = None):
+                 input_device: int | None = None, wake: bool = False,
+                 quick_transcribe: Callable[[np.ndarray], str] | None = None, follow_up_s: float = 12.0):
         self.agent = agent
         self._make, self._transcribe = make_conversation, transcribe
         self._say, self._stop_speech, self._speech_busy = say, stop_speech, speech_busy
@@ -62,6 +63,12 @@ class LiveSession:
         self._responding = False
         self._stream = None
         self._mic_thread = None
+        # wake mode: only react when called by name ("Kaguya…", "Miwa…"); after an answer, a short
+        # follow-up window lets the user keep talking without repeating the name
+        self.wake = wake
+        self._quick = quick_transcribe
+        self.follow_up_s = follow_up_s
+        self._awake_until = 0.0
 
     # ----------------------------------------------------------------- control
     def start(self, with_microphone: bool = True):
@@ -69,9 +76,13 @@ class LiveSession:
         threading.Thread(target=self._brain_loop, daemon=True, name="kaguya-live-brain").start()
         if with_microphone:
             self._open_microphone()
-        self._emit({"type": "agent", "agent": self.agent})
+        if not self.wake:
+            self._emit({"type": "agent", "agent": self.agent})
+            self.warm(self.agent)
+        else:  # processes only; no message is sent until the user calls a name
+            self.warm("codex")
+            self.warm("claude")
         self._state("listening")
-        self.warm(self.agent)
 
     def warm(self, agent: str):
         def run():
@@ -171,6 +182,9 @@ class LiveSession:
             audio = self._utterances.get()
             if audio is None or not self.running:
                 return
+            if self.wake and time.monotonic() > self._awake_until:
+                self._wake_check(audio)
+                continue
             self._state("transcribing")
             try:
                 text = (self._transcribe(audio) or "").strip()
@@ -181,19 +195,69 @@ class LiveSession:
             if len(text) < 2:
                 self._state("listening")
                 continue
+            if self.wake:
+                from .wake import detect_name
+                if detect_name(text)[0]:
+                    self.called(detect_name(text)[0], text)
+                    continue
             self.handle_text(text)
+
+    def _wake_check(self, audio):
+        """Cheap first pass (small model) only to find the name; nothing leaves the PC before that."""
+        from .wake import detect_name
+        try:
+            quick = ((self._quick or self._transcribe)(audio) or "").strip()
+        except Exception as exc:
+            self._emit({"type": "error", "message": f"Transcrição falhou: {exc}"})
+            return
+        agent, _ = detect_name(quick)
+        if agent is None:
+            self._emit({"type": "ignored", "text": quick})
+            return
+        text = quick
+        if self._quick is not None:  # accurate pass on the same audio for the actual request
+            self._state("transcribing")
+            try:
+                full = (self._transcribe(audio) or "").strip()
+                if full:
+                    a2, _ = detect_name(full)
+                    text, agent = full, a2 or agent
+            except Exception:
+                pass
+        self.called(agent, text)
+
+    def called(self, agent: str, text: str):
+        """The user said the assistant's name (voice) — wake up, show the mascot and answer."""
+        from .wake import detect_name
+        _a, rest = detect_name(text)
+        self.agent = agent
+        self._emit({"type": "called", "agent": agent, "text": text})
+        self._awake_until = time.monotonic() + self.follow_up_s + 60  # extended while answering
+        if len(rest) < 3:
+            self._emit({"type": "caption", "role": "user", "text": text, "final": True})
+            self._say("Oi! Pode falar." if agent == "codex" else "Oi, estou ouvindo.", agent)
+            self._awake_until = time.monotonic() + self.follow_up_s
+            self._state("listening")
+            return
+        self.handle_text(text)
+        self._awake_until = time.monotonic() + self.follow_up_s
 
     def handle_text(self, text: str):
         self._emit({"type": "caption", "role": "user", "text": text, "final": True})
         cmd, arg = command_of(text)
         if cmd == "end":
             self._say("Até mais!", self.agent)
+            if self.wake:
+                self._awake_until = 0.0
+                self._emit({"type": "sleep"})
+                self._state("listening")
+                return
             self.running = False
             self._emit({"type": "request_end"})
             return
         if cmd == "switch":
             self.set_agent(arg)
-            self._say("Oi, estou aqui." if arg == "claude" else "Oi, é a Kaguya.", arg)
+            self._say("Oi, é a Miwa." if arg == "claude" else "Oi, é a Kaguya.", arg)
             self._state("listening")
             return
         if cmd == "silence":
@@ -241,6 +305,8 @@ class LiveSession:
             if self._on_task:
                 self._on_task(task.strip(), agent)
         self._state("speaking" if self._speech_busy() else "listening")
+        if self.wake:
+            self._awake_until = time.monotonic() + self.follow_up_s
 
     def _speak_ready(self, buf: dict, agent: str, final: bool):
         text = buf["text"]

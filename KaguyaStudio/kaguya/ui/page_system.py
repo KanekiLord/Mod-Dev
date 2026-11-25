@@ -535,6 +535,18 @@ class SettingsPage(QWidget):
         self.neural_progress = QProgressBar()
         self.neural_progress.setFixedHeight(8)
         self.neural_progress.hide()
+        self.t_wake = Toggle("Chamar pelo nome: \"Kaguya…\" (Codex) ou \"Miwa…\" (Claude Code), mesmo com o Studio "
+                             "na bandeja", False)
+        self.t_wake.setToolTip("Microfone aberto com transcrição no seu PC; nada vai para a IA até você dizer o nome.")
+        self.t_wake.toggled.connect(lambda on: win.set_wake(on))
+        vc.lay.addWidget(self.t_wake)
+        self.t_tray = Toggle("Fechar (X) deixa o Studio rodando na bandeja, perto do relógio",
+                             bool(win.store.get_setting("ui.close_to_tray", True)))
+        self.t_tray.toggled.connect(lambda on: win.store.set_setting("ui.close_to_tray", on))
+        self.t_min = Toggle("Minimizar também esconde na bandeja", bool(win.store.get_setting("ui.minimize_to_tray", False)))
+        self.t_min.toggled.connect(lambda on: win.store.set_setting("ui.minimize_to_tray", on))
+        vc.lay.addWidget(self.t_tray)
+        vc.lay.addWidget(self.t_min)
         nrow.addWidget(self.neural_info, 1)
         nrow.addWidget(self.neural_btn)
         vc.lay.addLayout(nrow)
@@ -549,7 +561,7 @@ class SettingsPage(QWidget):
         self.engine_combo.currentIndexChanged.connect(lambda: win.store.set_setting("voice.engine", self.engine_combo.currentData()))
         vform.addRow("Motor de voz", self.engine_combo)
         self.neural_combos = {}
-        for agent, title in (("codex", "Voz neural da Kaguya"), ("claude", "Voz neural da Claude")):
+        for agent, title in (("codex", "Voz neural da Kaguya"), ("claude", "Voz neural da Miwa")):
             box = QHBoxLayout()
             cb = QComboBox()
             for pid, preset in PRESETS.items():
@@ -564,7 +576,7 @@ class SettingsPage(QWidget):
             self.neural_combos[agent] = cb
             vform.addRow(title, box)
         self.voice_combos = {}
-        for agent, title in (("codex", "Voz do Windows da Kaguya"), ("claude", "Voz do Windows da Claude")):
+        for agent, title in (("codex", "Voz do Windows da Kaguya"), ("claude", "Voz do Windows da Miwa")):
             cb = QComboBox()
             cb.addItem("Automática (pt-BR se instalada)", "")
             cb.currentIndexChanged.connect(lambda _=0, a=agent, c=cb: win.store.set_setting(f"voice.voice_{a}", c.currentData()))
@@ -711,7 +723,7 @@ class SettingsPage(QWidget):
         if not self.win.voice.neural.ready:
             self.win.toast("Baixe as vozes neurais primeiro.")
             return
-        name = "Kaguya" if agent == "codex" else "Claude"
+        name = "Kaguya" if agent == "codex" else "Miwa"
         self.win.voice.stop_speaking()
         if not self.win.voice.say(f"Oi! Eu sou a {name}. Esta é a minha voz no Kaguya Studio.", agent):
             self.win.toast("Saída de áudio indisponível nesta cópia.")

@@ -13,6 +13,8 @@
 2. ~~Controle de mouse/teclado~~ — feito na 4.6.0.
 
 ## Para validar no seu PC
+0. Bandeja: fechar no X e reabrir pelo ícone; "Chamar pelo nome": "Kaguya, …" / "Miwa, …" com e sem fone;
+   ChatGPT e Claude embutidos (entrar com e-mail).
 1. Live com fone: latência real, interrupção falando por cima, troca de IA por voz.
 2. Modo autônomo num projeto com Git: uma tarefa pequena e depois "Desfazer".
 3. Usar o PC com o Minecraft aberto: pedir "abra o mundo de teste e veja se o HUD aparece"; testar Parar,

@@ -28,6 +28,8 @@ def _args(argv):
     ap.add_argument("--flutuantes", action="store_true", help="em --captura, também captura as mascotes flutuantes")
     ap.add_argument("--verificar-voz", action="store_true", dest="verificar_voz",
                     help="grava em logs/voz.txt se a transcrição local está disponível e sai")
+    ap.add_argument("--segundo-plano", action="store_true", dest="segundo_plano",
+                    help="abre direto na bandeja (perto do relógio), sem mostrar a janela")
     ap.add_argument("--sair-apos", type=float, dest="sair_apos",
                     help="abre normalmente e fecha após N segundos (teste automático do modo normal)")
     return ap.parse_args(argv)
@@ -141,7 +143,10 @@ def main(argv=None) -> int:
         return app.exec()
     if args.captura:
         return _capture(app, win, args)
-    win.show()
+    if args.segundo_plano and getattr(win, "tray", None):
+        dg.step("iniciado na bandeja")
+    else:
+        win.show()
     dg.step("janela exibida; entrando no laço de eventos")
     if args.sair_apos:
         from PySide6.QtCore import QTimer

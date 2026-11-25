@@ -27,7 +27,7 @@ PROFILES = {
               "states": {"idle": "neutra", "running": "determinada", "success": "feliz", "error": "preocupada",
                          "cancelled": "emburrada", "limit": "cansada", "speaking": "falando", "listening": "curiosa",
                          "thinking": "pensando", "approved": "confiante", "rejected": "triste"}},
-    "claude": {"name": "Claude", "agent": "Claude Code", "folder": "claude", "prefix": "claude_feminina", "accent": C["amber"],
+    "claude": {"name": "Miwa", "agent": "Claude Code", "folder": "claude", "prefix": "claude_feminina", "accent": C["amber"],
                "expressions": ["neutra", "feliz", "pensando", "falando", "surpresa", "piscando", "focada", "sucesso", "cafe"],
                "states": {"idle": "neutra", "running": "focada", "success": "sucesso", "error": "surpresa",
                           "cancelled": "pensando", "limit": "cafe", "speaking": "falando", "listening": "piscando",

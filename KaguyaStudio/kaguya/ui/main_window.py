@@ -29,7 +29,7 @@ from .theme import AGENT, C
 from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
-NAV = [("chat", "chat", "Conversa"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
+NAV = [("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
        ("agents", "agents", "Agentes e skills"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
@@ -124,6 +124,10 @@ class MainWindow(QMainWindow):
         self.resize(1480, 920)
         self.setMinimumSize(1180, 720)
         self.mascots = {a: Mascot(a, engine.home / f"mascote_{a}.json") for a in ("codex", "claude")}
+        from .page_chat import set_portrait_source
+        from .widgets import load_sprite
+        set_portrait_source(lambda a: load_sprite(self.mascots[a].sprite_path("neutra"), True)
+                            if a in self.mascots else None)
         for m in self.mascots.values():
             m.open_chat.connect(self.quick_chat)
             m.open_studio.connect(self.bring_to_front)
@@ -145,6 +149,8 @@ class MainWindow(QMainWindow):
         self._limits_timer.start()
         self._later(3500, lambda: self.refresh_codex_limits())
         self._later(2500, lambda: run_bg(self.refresh_github_status))
+        if self.store.get_setting("wake.enabled", False) and self.store.get_setting("wake.consent", False):
+            self._later(4000, lambda: self.set_wake(True))  # the user left the name listener on
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -160,6 +166,10 @@ class MainWindow(QMainWindow):
         self.desktop_overlay = None
         self._hotkey = None
         self._retired: list = []
+        from .wake_ui import WakeController
+        self.wake = WakeController(self)
+        self._wake_resume = False
+        self.setup_tray()
         self.refresh_all()
         for m in self.mascots.values():
             if m.prefs.visible:
@@ -194,7 +204,9 @@ class MainWindow(QMainWindow):
         self.usage = UsagePage(self)
         self.diag = DiagnosticsPage(self)
         self.settings = SettingsPage(self)
-        self.pages = {"chat": self.chat, "queue": self.queue, "memory": self.memory, "agents": self.agents,
+        from .page_webchats import WebChatsPage
+        self.webchats = WebChatsPage(self)
+        self.pages = {"chat": self.chat, "webchats": self.webchats, "queue": self.queue, "memory": self.memory, "agents": self.agents,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)
@@ -472,7 +484,7 @@ class MainWindow(QMainWindow):
             return
         if on and not self.store.get_setting("desktop.consent", False):
             window = self.engine.setting("desktop.window") or ""
-            msg = ("Com \"Usar o PC\" ligado, a Kaguya (Codex) e a Claude poderão ver a tela e usar mouse e teclado "
+            msg = ("Com \"Usar o PC\" ligado, a Kaguya (Codex) e a Miwa (Claude Code) poderão ver a tela e usar mouse e teclado "
                    "durante as tarefas — por exemplo, abrir o Minecraft, entrar num mundo e conferir o mod.\n\n"
                    + (f"• Só a janela cujo título contém \"{window}\" é capturada e usada (mude em Configurações).\n"
                       if window else "• ATENÇÃO: a tela inteira está liberada (defina uma janela em Configurações).\n")
@@ -538,7 +550,7 @@ class MainWindow(QMainWindow):
                 return
             key = f"project.{self.pid}.autonomy_consent"
             if not self.store.get_setting(key, False):
-                msg = ("No modo autônomo, neste projeto, a Kaguya (Codex) e a Claude vão:\n\n"
+                msg = ("No modo autônomo, neste projeto, a Kaguya (Codex) e a Miwa (Claude Code) vão:\n\n"
                        "• editar arquivos, rodar comandos, builds (Gradle, com acesso à internet para baixar "
                        "dependências) e testes, e corrigir o que falhar — sem pedir confirmação;\n"
                        "• executar também as tarefas que você pedir no Modo Live.\n\n"
@@ -793,20 +805,16 @@ class MainWindow(QMainWindow):
             return
         target = self.chat.composer.target
         agent = agent or (target if target in ("codex", "claude") else "claude")
-        problems = []
-        st = stt.status(self.engine.home / "modelos", self.store.get_setting("voice.model", "small"))
-        if not st.ready:
-            problems.append("A transcrição local não está disponível nesta cópia (faltam: " + ", ".join(st.missing) + ").")
-        elif not st.model_cached and not self.store.get_setting("voice.model_consent", False):
-            problems.append("Autorize o download do modelo de transcrição em Configurações › Voz local.")
-        if not dv.available():
-            problems.append("O acesso a microfone/fone não está disponível nesta cópia.")
+        problems = self.voice_problems()
         if problems:
             QMessageBox.information(self, "Modo Live", "Para usar o Live:\n\n• " + "\n• ".join(problems))
             self.go("settings")
             return
         if not self.voice.neural.ready:
             self.toast("Dica: baixe as vozes neurais em Configurações › Voz para uma fala bem mais natural.")
+        if self.wake.running:  # one microphone user at a time: the name listener resumes after Live
+            self.wake.stop()
+            self._wake_resume = True
         from .live_window import LiveWindow
         self.live_window = LiveWindow(self)
         self.live_window.set_agent(agent)
@@ -830,19 +838,20 @@ class MainWindow(QMainWindow):
         run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd),
                lambda exc, tb: (self.live_window and self.live_window.on_event({"type": "error", "message": str(exc)})))
 
-    def _live_ready(self, exes: dict, agent: str, cwd: str):
+    def voice_problems(self) -> list[str]:
+        from ..voice import devices as dv, stt
+        problems = []
+        st = stt.status(self.engine.home / "modelos", self.store.get_setting("voice.model", "small"))
+        if not st.ready:
+            problems.append("A transcrição local não está disponível nesta cópia (faltam: " + ", ".join(st.missing) + ").")
+        elif not st.model_cached and not self.store.get_setting("voice.model_consent", False):
+            problems.append("Autorize o download do modelo de transcrição em Configurações › Voz local.")
+        if not dv.available():
+            problems.append("O acesso a microfone/fone não está disponível nesta cópia.")
+        return problems
+
+    def conversation_factory(self, exes: dict, cwd: str):
         from ..live.conversation import ClaudeConversation, CodexConversation
-        from ..live.session import LiveSession, NAMES_PROMPT
-        if self.live_window is None:
-            return
-        if isinstance(exes.get(agent), Exception):
-            other = "claude" if agent == "codex" else "codex"
-            if not isinstance(exes.get(other), Exception):
-                self.toast(f"{AGENT[agent]['name']} não está pronto; o Live começa com {AGENT[other]['name']}.")
-                agent = other
-            else:
-                self.live_window.on_event({"type": "error", "message": str(exes[agent])})
-                return
         engine, store = self.engine, self.store
 
         def make(a):
@@ -854,6 +863,42 @@ class MainWindow(QMainWindow):
                 return ClaudeConversation(exe, cwd, model=store.get_setting("live.model_claude", "haiku"), env=engine.env,
                                           on_rate_limit=engine._record_claude_limit)
             return CodexConversation(exe, cwd, model=store.get_setting("live.model_codex", ""), env=engine.env)
+        return make
+
+    def set_wake(self, on: bool):
+        if on and not self.wake.running:
+            self.wake.start()
+        elif not on and self.wake.running:
+            self.wake.stop()
+        self.sync_wake_ui()
+
+    def sync_wake_ui(self):
+        on = self.wake.running or self.wake.starting
+        if getattr(self, "tray", None):
+            self.tray_wake.blockSignals(True)
+            self.tray_wake.setChecked(on)
+            self.tray_wake.blockSignals(False)
+            self.tray.setToolTip(f"Kaguya Studio {VERSION}" + (" • ouvindo: diga Kaguya ou Miwa" if on else ""))
+        t = getattr(self.settings, "t_wake", None)
+        if t is not None:
+            t.blockSignals(True)
+            t.setChecked(on)
+            t.set_knob(1.0 if on else 0.0)
+            t.blockSignals(False)
+
+    def _live_ready(self, exes: dict, agent: str, cwd: str):
+        from ..live.session import LiveSession, NAMES_PROMPT
+        if self.live_window is None:
+            return
+        if isinstance(exes.get(agent), Exception):
+            other = "claude" if agent == "codex" else "codex"
+            if not isinstance(exes.get(other), Exception):
+                self.toast(f"{AGENT[agent]['name']} não está pronto; o Live começa com {AGENT[other]['name']}.")
+                agent = other
+            else:
+                self.live_window.on_event({"type": "error", "message": str(exes[agent])})
+                return
+        make = self.conversation_factory(exes, cwd)
 
         def on_event(ev):
             self.bridge.call.emit(lambda ev=ev: self.live_window and self.live_window.on_event(ev))
@@ -907,6 +952,9 @@ class MainWindow(QMainWindow):
         for m in self.mascots.values():
             if m.state in ("listening", "speaking", "thinking"):
                 m.set_state("idle")
+        if getattr(self, "_wake_resume", False):
+            self._wake_resume = False
+            QTimer.singleShot(1500, self, lambda: self.set_wake(True))
 
     # ------------------------------------------------------------------ audio devices
     def check_audio_devices(self, force: bool = False):
@@ -1192,6 +1240,9 @@ class MainWindow(QMainWindow):
 
     def detach(self):
         self._detached = True
+        if getattr(self, "wake", None) is not None:
+            self.wake.stop(remember=True)
+            self.wake.bubble.deleteLater()
         # top-level helper windows have no parent (they must stay visible when the Studio is minimized):
         # delete them explicitly so nothing outlives the main window
         for attr in ("desktop_overlay", "live_window"):
@@ -1243,6 +1294,7 @@ class MainWindow(QMainWindow):
             self.mascots["claude" if self.engine.setting("team.reviewer") == "claude" else "codex"].set_state(
                 "approved" if v == "aprovado" else "rejected" if v == "reprovado" else "thinking")
         elif t == "task_done":
+            self.wake.task_done(ev)
             self.task_started_at = None
             st = ev["status"]
             self.stepper.set_stage("final", failed=st not in ("approved", "executed"))
@@ -1278,7 +1330,67 @@ class MainWindow(QMainWindow):
             s = int(time.monotonic() - self.task_started_at)
             self.t_clock.setText(f"{s // 60:02d}:{s % 60:02d}")
 
+    # ------------------------------------------------------------------ background (system tray)
+    def setup_tray(self):
+        from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+        self._quitting = False
+        self.tray = None
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self.tray = QSystemTrayIcon(self.windowIcon(), self)
+        self.tray.setToolTip(f"Kaguya Studio {VERSION}")
+        menu = QMenu()
+        menu.addAction("Abrir Kaguya Studio", self.show_from_tray)
+        self.tray_wake = menu.addAction("Chamar pelo nome (Kaguya / Miwa)")
+        self.tray_wake.setCheckable(True)
+        self.tray_wake.toggled.connect(lambda on: self.set_wake(on))
+        menu.addAction("Modo Live", lambda: (self.show_from_tray(), self.start_live(None)))
+        menu.addAction("Mostrar/ocultar mascotes", lambda: [m.toggle_window() for m in self.mascots.values()])
+        menu.addSeparator()
+        menu.addAction("Sair", self.quit_app)
+        self.tray.setContextMenu(menu)
+        self._tray_menu = menu
+        self.tray.activated.connect(lambda reason: self.show_from_tray()
+                                    if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
+        self.tray.show()
+        QApplication.instance().setQuitOnLastWindowClosed(False)
+
+    def show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def to_background(self):
+        self.hide()
+        if self.tray and not self.store.get_setting("ui.tray_hint_shown", False):
+            self.store.set_setting("ui.tray_hint_shown", True)
+            self.tray.showMessage("Kaguya Studio continua aberto",
+                                  "As IAs seguem trabalhando em segundo plano. Clique no ícone da Kaguya perto do relógio "
+                                  "para abrir de novo, ou use Sair no menu dele para fechar de vez.", self.windowIcon(), 8000)
+
+    def quit_app(self):
+        self._quitting = True
+        if self.close():
+            from PySide6.QtWidgets import QApplication
+            if self.tray:
+                self.tray.hide()
+            QApplication.instance().quit()
+        else:
+            self._quitting = False
+
+    def changeEvent(self, e):
+        from PySide6.QtCore import QEvent
+        if (e.type() == QEvent.WindowStateChange and self.isMinimized() and getattr(self, "tray", None)
+                and self.store.get_setting("ui.minimize_to_tray", False)):
+            QTimer.singleShot(0, self, self.to_background)
+        super().changeEvent(e)
+
     def closeEvent(self, e):
+        if getattr(self, "tray", None) and not getattr(self, "_quitting", False) \
+                and self.store.get_setting("ui.close_to_tray", True):
+            e.ignore()
+            self.to_background()
+            return
         busy = [p for p in self.store.projects() if self.engine.is_running(p["id"])]
         if busy and QMessageBox.question(self, "Encerrar", "Há IAs trabalhando. Fechar interrompe as tarefas (ficam como "
                                          "'interrompidas' e podem ser retomadas). Fechar mesmo assim?") != QMessageBox.Yes:
@@ -1292,6 +1404,8 @@ class MainWindow(QMainWindow):
             self._hotkey.stop()
         if self.desktop_overlay is not None:
             self.desktop_overlay.close()
+        self.wake.stop()
+        self.wake.bubble.close()
         self.voice.shutdown()
         for m in self.mascots.values():
             if m.window:

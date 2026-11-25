@@ -27,6 +27,22 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   "realtime conversation requires API key auth" (por isso a voz realtime do Codex não é usada).
 - **CI Windows**: download dos arquivos Kokoro com verificação de hash e síntese dentro do `.exe` (`--verificar-voz`).
 
+## Chamar pelo nome, conversa, chats e bandeja (4.7.0)
+
+- `test_live.py › NameDetection`: "Kaguya, …", "Ei Miwa, …", "Miwa (Claude Code) …", grafias do Whisper ("kaguia");
+  citar o nome no meio da frase não chama; mensagens digitadas com o nome vão para a IA certa.
+- `test_live.py › WakeByName`: fala sem nome é ignorada sem chegar à IA; "Miwa, implemente…" acorda a Miwa, responde
+  e cria a tarefa; dentro da janela de continuação a próxima fala vai para ela sem o nome; depois volta a ignorar;
+  só "Kaguya" faz a Kaguya cumprimentar e esperar o pedido.
+- `test_ui_v4.py › CallByNameUi`: a mascote aparece com o balão (pedido + resposta); pedido sem modo autônomo vira
+  análise somente leitura; ao terminar a IA fala um resumo sem os títulos do relatório; mensagem digitada "Miwa, …"
+  vai para o Claude e aparece à direita; fechar com bandeja esconde e reabre; página de chats não carrega nada sem
+  clique e copia o contexto do projeto.
+- **Real (Linux)**: o navegador embutido abriu o claude.ai de verdade (aqui, num servidor de nuvem, o Cloudflare
+  pediu a verificação anti-robô).
+- **CI Windows (4.6.0)**: o `.exe --mcp-desktop` listou janelas, capturou a tela 1024×768, moveu o mouse e apertou
+  tecla no Windows real.
+
 ## Uso do computador (4.6.0)
 
 - `test_desktop.py` (backend simulado): só a janela permitida é capturada e as coordenadas são convertidas para a
@@ -103,6 +119,8 @@ capturas 100–200% com renderização do Windows, build PyInstaller e teste de 
 
 - Login e tarefas reais com **suas** assinaturas Codex e Claude; leitura de limites com sua conta Codex.
 - Seu vault real e o formato real do seu `tasks/todo.md`; seus 72 agentes nos diretórios reais.
+- Chamar pelo nome com o seu microfone e ruído de casa; login do ChatGPT/Claude no navegador embutido
+  (o Google pode recusar navegadores embutidos — use e-mail ou "Abrir no navegador").
 - Controle real do Minecraft no seu PC (captura de janela OpenGL, foco, teclas no jogo) e o Codex usando o
   servidor com a sua conta.
 - Microfone/fone reais, eco sem fone no Live, transcrição faster-whisper com sua voz, vozes SAPI do seu Windows

@@ -23,7 +23,7 @@ C = {
 }
 AGENT = {
     "codex": {"name": "Codex", "mascot": "Kaguya", "color": C["violet"], "bg": C["violet_bg"], "icon": "codex"},
-    "claude": {"name": "Claude", "mascot": "Claude", "color": C["amber"], "bg": C["amber_bg"], "icon": "claude"},
+    "claude": {"name": "Claude", "mascot": "Miwa", "color": C["amber"], "bg": C["amber_bg"], "icon": "claude"},
     "equipe": {"name": "Equipe", "mascot": "", "color": C["gold"], "bg": C["gold_bg"], "icon": "team"},
     "paralelo": {"name": "Paralelo", "mascot": "", "color": C["gold"], "bg": C["gold_bg"], "icon": "parallel"},
     "user": {"name": "Você", "mascot": "", "color": "#D9CCF0", "bg": C["surface2"], "icon": "chat"},

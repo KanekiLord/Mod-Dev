@@ -1,5 +1,25 @@
 # Changelog
 
+## 4.7.0 — 25/11/2026
+
+### Novo
+- **Chamar pelo nome**: diga "Kaguya, olha isso pra mim" (Codex) ou "Miwa, vê isso pra mim" (Claude Code) — a
+  mascote aparece na área de trabalho com um **balão de fala**, responde por voz e, se o pedido for trabalho, cria a
+  tarefa (executa direto no modo autônomo; senão analisa sem alterar nada) e avisa por voz quando termina.
+  - Escuta opcional (bandeja ou Configurações › Voz), explicada antes de ligar. A transcrição é local; **nada vai
+    para a IA antes de ouvir o nome**. Usa o modelo "base" para reconhecer os nomes gastando pouco processador e o
+    modelo principal para entender o pedido. Depois da resposta, alguns segundos para continuar sem repetir o nome.
+  - Também funciona digitando: "Miwa, revise isso" na conversa vai para o Claude Code.
+- A mascote do Claude Code agora se chama **Miwa**.
+- **Conversa no estilo WhatsApp**: balões com cauda, suas mensagens à direita com ✓✓, as das IAs à esquerda com o
+  rostinho da mascote, hora dentro do balão e avisos do Studio centralizados.
+- **ChatGPT e Claude (chats normais)** dentro do Studio: os sites oficiais num navegador embutido, com o seu login,
+  sem automação nem leitura das conversas; botão "Copiar contexto do projeto" e "Abrir no navegador".
+  Aviso honesto: no Claude o chat e o Claude Code usam o **mesmo** limite; no ChatGPT, Codex e "ChatGPT Work" dividem
+  o limite do plano e o chat comum tem limites próprios.
+- **Segundo plano**: fechar (X) deixa o Studio rodando na **bandeja**, perto do relógio (opção para minimizar também);
+  clique no ícone para abrir; menu com Chamar pelo nome, Live, mascotes e Sair. `--segundo-plano` abre direto na bandeja.
+
 ## 4.6.0 — 25/11/2026
 
 ### Novo

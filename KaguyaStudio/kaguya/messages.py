@@ -30,6 +30,12 @@ def classify_message(text: str, default_target: str = "equipe") -> Intent:
     if not value:
         raise ValueError("Mensagem vazia")
     kind, target, interrupt, parallel = "execute", default_target, False, False
+    if not value.startswith("@"):
+        # "Kaguya, olha isso…" → Codex; "Miwa, vê isso…" → Claude Code (the name stays in the text)
+        from .live.wake import detect_name
+        called, _rest = detect_name(value)
+        if called and not re.match(r"^\W*(codex|claude)\b", value, re.I):
+            target = called
     for _ in range(4):
         m = _TARGET.match(value)
         if m:

@@ -19,7 +19,7 @@ def main(exe: str, out_png: str) -> int:
             {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "press_keys", "arguments": {"keys": "shift"}}}]
     p = subprocess.run([exe, "--mcp-desktop"], input="\n".join(json.dumps(m) for m in msgs) + "\n",
                        capture_output=True, text=True, timeout=120)
-    print("código:", p.returncode, "stderr:", p.stderr[-800:])
+    print("codigo:", p.returncode, "stderr:", p.stderr[-800:])
     replies = {r["id"]: r for r in (json.loads(l) for l in p.stdout.splitlines() if l.strip())}
     assert set(replies) == {1, 2, 3, 4, 5, 6}, f"respostas: {sorted(replies)}\n{p.stdout[:2000]}"
     assert replies[1]["result"]["serverInfo"]["name"] == "kaguya_desktop"
@@ -34,7 +34,7 @@ def main(exe: str, out_png: str) -> int:
     assert png.startswith(b"\x89PNG") and len(png) > 1000, len(png)
     with open(out_png, "wb") as fh:
         fh.write(png)
-    print(f"captura real de tela: {len(png)} bytes → {out_png}")
+    print(f"captura real de tela: {len(png)} bytes -> {out_png}")
     return 0
 
 

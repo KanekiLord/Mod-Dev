@@ -66,7 +66,7 @@ class Commands(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("git") or True, "")
-class Session(unittest.TestCase):
+class SessionBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -101,6 +101,9 @@ class Session(unittest.TestCase):
         for f in frames(np.concatenate([noise(0.6), speechlike(1.0), noise(1.0, seed=3)])):
             self.s.feed(f)
 
+
+
+class Session(SessionBase):
     def test_turns_keep_context_speak_sentences_and_queue_tasks(self):
         self.speak_into_mic()
         self.assertTrue(self.wait(lambda: self.tasks), self.events[-5:])
@@ -121,6 +124,67 @@ class Session(unittest.TestCase):
         self.speak_into_mic()
         self.assertTrue(self.stopped.is_set())
         self.assertTrue(any(e["type"] == "barge_in" for e in self.events))
+
+
+class WakeByName(SessionBase):
+    """Background listener: only a name wakes an assistant; nothing reaches the AI before that."""
+
+    def setUp(self):
+        super().setUp()
+        self.s.stop()
+        self.texts = ["que dia lindo hoje", "Miwa, implemente o HUD de chakra", "e o que mais?",
+                      "conversa da sala sem nome", "Kaguya"]
+        self.made = []
+
+        def make(agent):
+            self.made.append(agent)
+            c = ClaudeConversation(self.exe["claude"], Path(self.tmp.name), env=self.env)
+            self.addCleanup(c.close)
+            return c
+        self.events.clear()
+        self.s = LiveSession(agent="codex", make_conversation=make, transcribe=lambda a: self.texts.pop(0),
+                             say=lambda text, agent: self.said.append((agent, text)) or True,
+                             stop_speech=self.stopped.set, speech_busy=lambda: False,
+                             on_event=self.events.append, on_task=lambda t, a: self.tasks.append((a, t)),
+                             wake=True, follow_up_s=30)
+        self.s.start(with_microphone=False)
+        self.addCleanup(self.s.stop)
+
+    def test_name_wakes_follow_up_then_sleeps(self):
+        self.speak_into_mic()  # "que dia lindo hoje" → ignored
+        self.assertTrue(self.wait(lambda: any(e["type"] == "ignored" for e in self.events)))
+        self.assertFalse([e for e in self.events if e["type"] == "caption"])
+        self.speak_into_mic()  # "Miwa, implemente…" → Claude wakes up, answers, task queued
+        self.assertTrue(self.wait(lambda: self.tasks), self.events[-6:])
+        called = [e for e in self.events if e["type"] == "called"]
+        self.assertEqual(called[0]["agent"], "claude")
+        self.assertEqual(self.tasks[0][0], "claude")
+        self.assertTrue(all(a == "claude" for a, _ in self.said))
+        n = len(self.said)
+        self.speak_into_mic()  # follow-up without the name still goes to Miwa
+        self.assertTrue(self.wait(lambda: len(self.said) > n and "Já são 2 mensagens" in " ".join(t for _, t in self.said)))
+        self.s._awake_until = 0  # follow-up window over
+        before = len([e for e in self.events if e["type"] == "caption"])
+        self.speak_into_mic()  # no name → ignored again
+        self.assertTrue(self.wait(lambda: sum(e["type"] == "ignored" for e in self.events) >= 2))
+        self.assertEqual(before, len([e for e in self.events if e["type"] == "caption"]))
+        self.speak_into_mic()  # just "Kaguya" → greeting from Kaguya, waiting for the request
+        self.assertTrue(self.wait(lambda: self.said[-1][0] == "codex"))
+        self.assertIn("Pode falar", self.said[-1][1])
+
+
+class NameDetection(unittest.TestCase):
+    def test_names_and_typed_messages(self):
+        from kaguya.live.wake import detect_name
+        from kaguya.messages import classify_message
+        self.assertEqual(detect_name("Kaguya, poderia olhar isso para mim?"), ("codex", "poderia olhar isso para mim?"))
+        self.assertEqual(detect_name("Ei Miwa, vê isso pra mim")[0], "claude")
+        self.assertEqual(detect_name("Miwa (Claude Code) poderia ver isso")[1], "poderia ver isso")
+        self.assertEqual(detect_name("kaguia olha o log")[0], "codex")  # common Whisper spelling
+        self.assertIsNone(detect_name("a Kaguya disse que sim")[0])   # mentioned, not called
+        self.assertEqual(classify_message("Miwa, revise o PR", "equipe").target, "claude")
+        self.assertEqual(classify_message("Kaguya (Codex) poderia olhar isso", "claude").target, "codex")
+        self.assertEqual(classify_message("@equipe: Kaguya implementa", "codex").target, "equipe")
 
 
 if __name__ == "__main__":

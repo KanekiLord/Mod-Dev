@@ -79,6 +79,7 @@ jobs:
         run: |
           $env:KAGUYA_DESKTOP_DIR = "$env:RUNNER_TEMP\kaguya-desktop"
           $env:KAGUYA_DESKTOP_WINDOW = ""
+          $env:PYTHONIOENCODING = "utf-8"
           python tools/checar_desktop_exe.py "dist\KaguyaStudio\KaguyaStudio.exe" capturas\win_desktop_mcp.png
 
       - name: Executável em modo normal (como o usuário abre), com dados da V3 para importar

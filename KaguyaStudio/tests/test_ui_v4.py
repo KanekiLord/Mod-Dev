@@ -142,7 +142,7 @@ class UiSmoke(UiBase):
 
     def test_all_pages_render_without_projects(self):
         w = self.window()
-        for key in ("chat", "queue", "memory", "agents", "usage", "diag", "settings"):
+        for key in ("chat", "webchats", "queue", "memory", "agents", "usage", "diag", "settings"):
             w.go(key)
             self.app.processEvents()
             self.assertFalse(w.grab().isNull())
@@ -328,6 +328,81 @@ class DesktopUi(UiBase):
         self.assertGreaterEqual(w.desktop_overlay.count, 2)  # screenshot + click seen by the overlay
         w.stop_desktop("botão Parar")
         self.assertIn("Parar", control.stop_reason(self.engine.home / "desktop"))
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class CallByNameUi(UiBase):
+    def test_called_by_name_mascot_bubble_task_and_spoken_result(self):
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        spoken = []
+        w.voice.say = lambda text, agent: spoken.append((agent, text)) or True
+        wk = w.wake
+        wk.on_event({"type": "called", "agent": "claude", "text": "Miwa, vê o log do servidor"})
+        self.assertTrue(w.mascots["claude"].window.isVisible())    # Miwa pops up on the desktop
+        self.assertTrue(wk.bubble.isVisible())
+        wk.on_event({"type": "caption", "role": "assistant", "agent": "claude", "text": "Vi sim: o erro é no MissaoManager.",
+                     "final": True})
+        self.assertIn("MissaoManager", wk.bubble.text.text())
+        self.assertIn("Miwa, vê o log", wk.bubble.who.text())
+        wk.on_task("corrigir o MissaoManager", "claude")          # not autonomous → read-only analysis task
+        t = self.store.tasks(pid)[0]
+        self.assertEqual((t["kind"], t["target"], t["allow_write"]), ("execute", "claude", 0))
+        self.assertIn("modo autônomo", spoken[-1][1])
+        self.assertTrue(self.pump(lambda: self.store.get_task(t["id"])["status"] not in ("queued", "running")))
+        self.assertTrue(self.pump(lambda: len(spoken) >= 2 and spoken[-1][1].startswith(("Terminei", "A tarefa")), 10))
+        self.assertEqual(spoken[-1][0], "claude")
+        self.assertNotIn("EVIDÊNCIAS", spoken[-1][1])
+        wk.bubble.hide()
+
+    def test_typed_name_routes_message_and_chat_bubbles(self):
+        from kaguya.ui.page_chat import MessageCard
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        self.assertTrue(w.send_message("Miwa, poderia ver isso para mim?", "equipe", ""))
+        self.assertEqual(self.store.tasks(pid)[0]["target"], "claude")
+        cards = [w.chat.view.lay.itemAt(i).widget() for i in range(w.chat.view.lay.count())]
+        cards = [c for c in cards if isinstance(c, MessageCard)]
+        self.assertEqual(cards[0].side, "right")  # the user's own message on the right, like WhatsApp
+        self.pump(lambda: any(c.side == "left" for c in [w.chat.view.lay.itemAt(i).widget()
+                                                          for i in range(w.chat.view.lay.count())]
+                              if isinstance(c, MessageCard)), 20)
+
+    def test_webchats_page_never_loads_until_asked_and_copies_context(self):
+        from PySide6.QtWidgets import QApplication
+        pid = self.store.add_project("NarutoCD", self.project)
+        w = self.window()
+        w.select_project(pid)
+        w.go("webchats")
+        self.assertEqual(w.webchats.views, {})            # nothing opened (no network) until the user clicks
+        from kaguya.ui.page_webchats import LIMITS_NOTE
+        self.assertIn("<b>mesmo</b> limite", LIMITS_NOTE)  # honest: Claude chat and Claude Code share the limit
+        w.webchats.copy_context()
+        text = QApplication.clipboard().text()
+        self.assertIn("NarutoCD", text)
+        self.assertTrue(text.rstrip().endswith("Minha pergunta:"))
+
+    def test_close_goes_to_background_when_tray_exists(self):
+        w = self.window()
+
+        class FakeTray:
+            msgs = []
+
+            def showMessage(self, *a):
+                self.msgs.append(a)
+
+            def hide(self):
+                pass
+        w.tray = FakeTray()
+        w.close()
+        self.assertFalse(w.isVisible())                     # hidden, still running
+        self.assertFalse(w._detached)
+        self.assertTrue(FakeTray.msgs)                      # explained once
+        w.show_from_tray()
+        self.assertTrue(w.isVisible())
+        w.tray = None
 
 
 def tearDownModule():

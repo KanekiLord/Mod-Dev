@@ -41,8 +41,7 @@ def main() -> int:
            "--add-data", f"assets{SEP}assets", "--add-data", f"catalogo{SEP}catalogo",
            "--collect-submodules", "kaguya",
            *voice_args(),
-           "--exclude-module", "tkinter", "--exclude-module", "PySide6.QtWebEngineCore",
-           "--exclude-module", "PySide6.Qt3DCore", "--exclude-module", "PySide6.QtQuick",
+           "--exclude-module", "tkinter", "--exclude-module", "PySide6.Qt3DCore", "--exclude-module", "PySide6.QtQuick",
            "run_kaguya.py"]
     print(" ".join(cmd))
     subprocess.run(cmd, check=True)

@@ -75,7 +75,7 @@ class LiveWindow(QWidget):
         for b in (self.mute_btn, self.switch_btn, hush, end):
             row.addWidget(b)
         lay.addLayout(row)
-        hint = label("Fale normalmente • fale por cima para interromper • diga \"falar com a Claude\" ou \"encerrar\". "
+        hint = label("Fale normalmente • fale por cima para interromper • diga \"falar com a Miwa\" ou \"encerrar\". "
                      "Use fone para a IA não ouvir a própria voz. Pedidos de mudança no código viram tarefas na fila.",
                      "dim", wrap=True)
         hint.setStyleSheet(f"color: {C['dim']}; font-size: 8.5pt;")
