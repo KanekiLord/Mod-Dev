@@ -12,7 +12,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kaguya.live.conversation import ClaudeConversation  # noqa: E402
+from kaguya.live.conversation import ClaudeConversation, ConversationError  # noqa: E402
 from kaguya.live.session import LiveSession, command_of  # noqa: E402
 from kaguya.live.vad import EnergyVAD, RATE  # noqa: E402
 from tests.helpers import fake_env, make_fake_clis  # noqa: E402
@@ -122,6 +122,25 @@ class Session(SessionBase):
         states = [e["state"] for e in self.events if e["type"] == "state"]
         for st in ("hearing", "transcribing", "thinking", "speaking"):
             self.assertIn(st, states)
+
+    def test_close_never_leaves_a_process_behind(self):
+        c = ClaudeConversation(self.exe["claude"], Path(self.tmp.name), env=self.env)
+        def warm():
+            try:
+                c.warm()
+            except ConversationError:
+                pass                                # close() won the race
+        started = threading.Thread(target=warm)
+        started.start()
+        c.close()                                   # races with the start: either it is closed, or never started
+        started.join(10)
+        self.assertIsNone(c.proc)
+        with self.assertRaises(ConversationError):
+            c.ask("oi", on_delta=lambda d: None, timeout=5)
+        self.assertIsNone(c.proc)
+        self.s.stop()
+        with self.assertRaises(RuntimeError):
+            self.s._conversation("claude")           # nothing new is opened after the Live ends
 
     def test_barge_in_stops_voice(self):
         self.busy = True

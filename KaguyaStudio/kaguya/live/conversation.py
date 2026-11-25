@@ -58,6 +58,15 @@ class ClaudeConversation:
         self._events: "queue.Queue[dict]" = queue.Queue()
         self.session_id: str | None = None
         self._lock = threading.Lock()
+        self._spawn = threading.Lock()   # close() waits for a process being started, never leaves one behind
+        self.closed = False
+
+    def _ensure(self):
+        with self._spawn:
+            if self.closed:
+                raise ConversationError("A conversa foi encerrada.")
+            if self.proc is None or self.proc.poll() is not None:
+                self._start()
 
     def _start(self):
         cmd = [self.exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
@@ -75,26 +84,27 @@ class ClaudeConversation:
         proc, events = self.proc, self._events
 
         def reader():
-            for line in proc.stdout:
-                line = line.strip()
-                if line.startswith("{"):
-                    try:
-                        events.put(json.loads(line))
-                    except ValueError:
-                        pass
+            try:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line.startswith("{"):
+                        try:
+                            events.put(json.loads(line))
+                        except ValueError:
+                            pass
+            except (OSError, ValueError):       # stdout closed by close()
+                pass
             events.put({"type": "_closed"})
         threading.Thread(target=reader, daemon=True).start()
 
     def warm(self):
         """Start the process ahead of the first question (removes ~2-3 s from the first answer)."""
         with self._lock:
-            if self.proc is None or self.proc.poll() is not None:
-                self._start()
+            self._ensure()
 
     def ask(self, text: str, on_delta: OnDelta, cancel: threading.Event | None = None, timeout: float = 180) -> str:
         with self._lock:
-            if self.proc is None or self.proc.poll() is not None:
-                self._start()
+            self._ensure()
             msg = {"type": "user", "message": {"role": "user", "content": text}}
             try:
                 self.proc.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
@@ -142,13 +152,26 @@ class ClaudeConversation:
                 pass
 
     def close(self):
-        if self.proc and self.proc.poll() is None:
+        self.closed = True
+        with self._spawn:                      # a process being started right now is finished first, then closed
+            proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        if proc.poll() is None:
             try:
-                self.proc.stdin.close()
-                self.proc.wait(5)
+                proc.stdin.close()
+                proc.wait(5)
             except (OSError, subprocess.TimeoutExpired):
-                self.proc.kill()
-        self.proc = None
+                proc.kill()
+                try:
+                    proc.wait(5)
+                except subprocess.TimeoutExpired:
+                    pass
+        for f in (proc.stdin, proc.stdout):
+            try:
+                f.close()
+            except (OSError, ValueError):
+                pass
 
 
 class CodexConversation:

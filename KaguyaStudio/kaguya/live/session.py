@@ -295,6 +295,8 @@ class LiveSession:
         self._respond(text)
 
     def _conversation(self, agent: str):
+        if not self.running:                       # stop() already closed everything: never open a new CLI
+            raise RuntimeError("O Live foi encerrado.")
         if agent not in self.convs:
             self.convs[agent] = self._make(agent)
         return self.convs[agent]

@@ -26,6 +26,11 @@ Relatório completo, decisões, evidências reais, limitações e rollback: `doc
 - **Blender/Blockbench**: um escritor por arquivo/aplicativo de cada vez e backup do `.blend`/`.bbmodel` antes.
 - **Plugins só da web** (ChatGPT/Claude web) podem ser registrados e aparecem como não transferíveis.
 
+### Corrigido
+- Live: encerrar o Live no instante em que a Miwa estava abrindo o Claude Code podia deixar o processo aberto em
+  segundo plano (achado pelo CI do Windows). Agora o encerramento espera a abertura e fecha o processo, e nada novo
+  é aberto depois do fim.
+
 ## 5.7.0 — 25/11/2026 (Etapa D: Leitor Universal + motor de conhecimento)
 
 ### Novo — Leitor Universal (botão **Anexar** na Conversa)
