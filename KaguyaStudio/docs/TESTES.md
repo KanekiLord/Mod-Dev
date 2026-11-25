@@ -40,6 +40,9 @@ Princípio: nada é declarado "funcionando" com base em mock. Cada linha diz **o
   carregou o modelo em 8,8 s e sintetizou 7 frases pt-BR com RTF 3,75–4,13; Whisper reconheceu português (0,99–1,0)
   nas vozes serena, vivian, ono_anna e sohee. Bug encontrado: a biblioteca imprime no stdout → canal protegido.
 - **Não feito**: instalação real no Windows (≈ 4 GB — fica para você, pelo botão); avaliação auditiva sua.
+- `test_music.py › CorruptionRecovery`: arquivo que não é banco → backup + biblioteca funcionando; página da tabela de
+  músicas danificada no disco com o Studio aberto → recupera na hora, mantém pasta e playlist, reescaneia, e o arquivo
+  novo abre limpo. (Motivo: erro "malformed" visto uma vez no CI Windows da 5.1.0; não reproduzido.)
 
 ## Vozes naturais — 5.2.0
 

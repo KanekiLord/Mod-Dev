@@ -129,3 +129,48 @@ class RealPlayer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CorruptionRecovery(unittest.TestCase):
+    """A Windows CI run once found the library file 'malformed': the index must heal itself, never break the page."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "Músicas"
+        for name in ("A - Um.wav", "B - Dois.wav", "C - Três.wav"):
+            tone(self.root / name)
+        self.db = Path(self.tmp.name) / "musica.sqlite3"
+
+    def test_garbage_file_is_kept_as_backup_and_library_works(self):
+        self.db.write_bytes(b"isto nao e um banco" * 300)
+        lib = MusicLibrary(self.db)
+        self.assertEqual(len(lib.recovered), 1)
+        self.assertTrue(Path(lib.recovered[0]).exists())          # damaged file kept, not deleted
+        self.assertEqual(lib.add_folder(self.root), 3)
+        self.assertEqual(lib.count(), 3)
+
+    def test_damage_on_disk_while_open_heals_and_keeps_user_data(self):
+        lib = MusicLibrary(self.db)
+        lib.add_folder(self.root)
+        pid = lib.create_playlist("Foco")
+        lib.add_to_playlist(pid, [t.id for t in lib.tracks()])
+        lib.set_favorite(lib.tracks("Dois")[0].id, True)
+        # damage the tracks table's page on disk; folders and playlists live on other pages
+        import sqlite3
+        con = sqlite3.connect(str(self.db))
+        root = con.execute("SELECT rootpage FROM sqlite_master WHERE name='tracks'").fetchone()[0]
+        con.close()
+        data = bytearray(self.db.read_bytes())
+        page = int.from_bytes(data[16:18], "big") or 65536
+        start = (root - 1) * page
+        data[start:start + page] = b"\xff" * page
+        self.db.write_bytes(bytes(data))
+        self.assertEqual(len(lib.tracks()), 3)                    # healed on the spot, music rescanned
+        self.assertEqual(len(lib.recovered), 1)
+        self.assertEqual(lib.folders(), [str(self.root.resolve())])
+        foco = lib.find_playlist("foco")
+        self.assertIsNotNone(foco)                                # playlist kept (emptied: its ids were lost)
+        self.assertEqual(lib.playlist_tracks(foco["id"]), [])
+        reopened = MusicLibrary(self.db)                          # the new file is healthy
+        self.assertEqual((reopened.recovered, reopened.count()), ([], 3))

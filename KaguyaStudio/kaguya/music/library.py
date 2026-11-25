@@ -8,10 +8,47 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 from pathlib import Path
+import functools
 import re
 import sqlite3
 import threading
+import time
 import unicodedata
+
+SCHEMA = """
+    CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY, added_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS tracks(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+        artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0,
+        folder TEXT NOT NULL DEFAULT '', search TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
+        plays INTEGER NOT NULL DEFAULT 0, last_played TEXT, added_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS playlist_items(playlist_id INTEGER NOT NULL, track_id INTEGER NOT NULL,
+        pos INTEGER NOT NULL, PRIMARY KEY(playlist_id, track_id));
+"""
+TABLES = ("folders", "tracks", "playlists", "playlist_items")
+
+
+def _corrupt(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return isinstance(exc, sqlite3.DatabaseError) and ("malformed" in msg or "not a database" in msg
+                                                        or "disk image" in msg)
+
+
+def _healing(fn):
+    """The library is a rebuildable index: if its file is found corrupted, recover once and retry."""
+    @functools.wraps(fn)
+    def wrapper(self, *a, **kw):
+        try:
+            return fn(self, *a, **kw)
+        except sqlite3.DatabaseError as exc:
+            if not _corrupt(exc):
+                raise
+            self.recover(str(exc))
+            return fn(self, *a, **kw)
+    return wrapper
+
 
 AUDIO_EXT = {".mp3", ".flac", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma"}
 MAX_TRACKS = 20000
@@ -52,19 +89,64 @@ class MusicLibrary:
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        with self._db() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY, added_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS tracks(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
-                    artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0,
-                    folder TEXT NOT NULL DEFAULT '', search TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
-                    plays INTEGER NOT NULL DEFAULT 0, last_played TEXT, added_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
-                    created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS playlist_items(playlist_id INTEGER NOT NULL, track_id INTEGER NOT NULL,
-                    pos INTEGER NOT NULL, PRIMARY KEY(playlist_id, track_id));
-            """)
+        self.recovered: list[str] = []     # backups made after a corruption (shown in the Music page)
+        try:
+            with self._db() as db:
+                if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise sqlite3.DatabaseError("database disk image is malformed (quick_check)")
+                db.executescript(SCHEMA)
+        except sqlite3.DatabaseError as exc:
+            if not _corrupt(exc):
+                raise
+            self.recover(str(exc))
+
+    def recover(self, reason: str = "") -> Path:
+        """Keep the damaged file as a backup, salvage every row still readable (folders, playlists, favourites,
+        plays) into a fresh file and rescan the folders. Never deletes the user's music."""
+        with self._lock:
+            backup = self.path.with_name(f"{self.path.name}.corrompido-{time.strftime('%Y%m%d-%H%M%S')}")
+            n = 1
+            while backup.exists():
+                backup = backup.with_name(f"{backup.name}-{n}")
+                n += 1
+            self.path.replace(backup)
+            for suffix in ("-journal", "-wal", "-shm"):
+                side = self.path.with_name(self.path.name + suffix)
+                if side.exists():
+                    side.replace(backup.with_name(backup.name + suffix))
+            salvaged: dict[str, list[tuple]] = {}
+            try:
+                old = sqlite3.connect(str(backup))
+                for table in TABLES:
+                    try:
+                        salvaged[table] = old.execute(f"SELECT * FROM {table}").fetchall()
+                    except sqlite3.DatabaseError:
+                        rows = []
+                        try:   # row by row up to the damaged page
+                            for r in old.execute(f"SELECT * FROM {table}"):
+                                rows.append(tuple(r))
+                        except sqlite3.DatabaseError:
+                            pass
+                        salvaged[table] = rows
+                old.close()
+            except sqlite3.DatabaseError:
+                pass
+            if not salvaged.get("tracks"):
+                salvaged["playlist_items"] = []   # old ids would point to the wrong songs after the rescan
+            with self._db() as db:
+                db.executescript(SCHEMA)
+                for table, rows in salvaged.items():
+                    if rows:
+                        marks = ",".join("?" * len(rows[0]))
+                        try:
+                            db.executemany(f"INSERT OR IGNORE INTO {table} VALUES({marks})", rows)
+                        except sqlite3.DatabaseError:
+                            pass
+            self.recovered.append(str(backup))
+            for folder in [r[0] for r in salvaged.get("folders", [])]:
+                if Path(folder).is_dir():
+                    self.add_folder(folder)
+            return backup
 
     def _db(self):
         lock = self._lock
@@ -244,3 +326,9 @@ class MusicLibrary:
             if q and (q in n or n in q) and best is None:
                 best = p
         return best
+
+
+for _name in ("folders", "add_folder", "remove_folder", "prune_missing", "tracks", "get", "by_path", "count",
+              "update_meta", "played", "set_favorite", "playlists", "create_playlist", "delete_playlist",
+              "add_to_playlist", "playlist_tracks"):
+    setattr(MusicLibrary, _name, _healing(getattr(MusicLibrary, _name)))

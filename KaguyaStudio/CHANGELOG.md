@@ -22,6 +22,12 @@
 - Conclusão honesta: com a GT 1030 (2 GB, sem suporte útil) roda na CPU; serve para ouvir e comparar, **não** para
   conversa em tempo real. O Kokoro continua o padrão.
 
+### Corrigido
+- **Biblioteca de músicas se recupera sozinha** se o arquivo for danificado (um teste no Windows encontrou o erro
+  "database disk image is malformed" uma vez; não se repetiu e a causa não foi reproduzida). O arquivo antigo fica
+  guardado como `musica.sqlite3.corrompido-<data>`, pastas, playlists e favoritas ainda legíveis são salvas, as músicas
+  são reescaneadas e a página avisa. Suas músicas nunca são tocadas.
+
 ### Avaliado e adiado
 - **Chatterbox Multilingual (pt-BR)**: projeto arquivado desde 08/2026 e carregador próprio para o checkpoint pt-BR;
   não instalado nem oferecido nesta versão.

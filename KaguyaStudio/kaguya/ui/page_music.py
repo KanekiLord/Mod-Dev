@@ -117,6 +117,11 @@ class MusicPage(QWidget):
     # ------------------------------------------------------------------ data
     def refresh(self):
         st = self.win.store
+        lib = self.win.music.lib
+        if lib.recovered and getattr(self, "_warned", 0) < len(lib.recovered):
+            self._warned = len(lib.recovered)
+            self.win.toast("A biblioteca de músicas estava danificada e foi refeita a partir das suas pastas. "
+                           f"O arquivo antigo ficou guardado: {Path(lib.recovered[-1]).name}")
         self.t_dock.blockSignals(True)
         self.t_dock.setChecked(bool(st.get_setting("music.dock.visible", True)))
         self.t_dock.set_knob(1.0 if self.t_dock.isChecked() else 0.0)
