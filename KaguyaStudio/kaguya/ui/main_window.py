@@ -29,7 +29,7 @@ from .theme import AGENT, C
 from .voice_ui import VoiceController
 from .widgets import Card, Dot, Header, Meter, Pill, SpriteView, Stepper, button, icon_label, label
 
-NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("webchats", "globe", "ChatGPT e Claude"), ("music", "music", "Kaguya Music"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
+NAV = [("home", "home", "Início"), ("chat", "chat", "Conversa"), ("browser", "globe", "Navegador"), ("webchats", "link", "ChatGPT e Claude"), ("music", "music", "Kaguya Music"), ("queue", "queue", "Fila de tarefas"), ("memory", "brain", "Segundo Cérebro"),
        ("agents", "agents", "Agentes e skills"), ("persona", "sparkle", "Personalidades"), ("voices", "volume", "Vozes"), ("usage", "gauge", "Uso e limites"), ("diag", "pulse", "Diagnóstico"),
        ("settings", "settings", "Configurações")]
 
@@ -224,6 +224,8 @@ class MainWindow(QMainWindow):
         self.settings = SettingsPage(self)
         from .page_webchats import WebChatsPage
         self.webchats = WebChatsPage(self)
+        from .page_browser import BrowserPage
+        self.browser = BrowserPage(self)
         from .page_persona import PersonaPage
         self.persona_page = PersonaPage(self)
         from .page_home import HomePage
@@ -232,7 +234,7 @@ class MainWindow(QMainWindow):
         self.music_page = MusicPage(self)
         from .page_voices import VoicesPage
         self.voices_page = VoicesPage(self)
-        self.pages = {"home": self.home, "chat": self.chat, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page, "voices": self.voices_page,
+        self.pages = {"home": self.home, "chat": self.chat, "browser": self.browser, "webchats": self.webchats, "music": self.music_page, "queue": self.queue, "memory": self.memory, "agents": self.agents, "persona": self.persona_page, "voices": self.voices_page,
                       "usage": self.usage, "diag": self.diag, "settings": self.settings}
         for p in self.pages.values():
             self.stack.addWidget(p)

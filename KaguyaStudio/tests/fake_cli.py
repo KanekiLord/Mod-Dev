@@ -64,6 +64,7 @@ CODEX_EXEC_HELP = """Usage: codex exec [OPTIONS] [PROMPT]
 Commands: resume
   -s, --sandbox <SANDBOX_MODE> [possible values: read-only, workspace-write, danger-full-access]
   -c, --config <key=value>  -C, --cd <DIR>  -m, --model <MODEL>  --skip-git-repo-check  --json  -o, --output-last-message <FILE>
+  -i, --image <FILE>...
 """
 
 if name == "claude":
@@ -106,6 +107,9 @@ if name == "claude":
     if "-p" in args:
         # Emulate commander's variadic options: positional after --disallowedTools is a tool name.
         prompt = sys.stdin.read()
+        if os.environ.get("FAKE_PROMPT_LOG"):   # lets tests see exactly what the assistant received
+            with open(os.environ["FAKE_PROMPT_LOG"], "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"cli": name, "args": args, "prompt": prompt}) + "\n")
         if not prompt.strip():
             print("Error: Input must be provided either through stdin or as a prompt argument", file=sys.stderr)
             sys.exit(1)
@@ -180,6 +184,9 @@ if name == "codex":
             print("Not inside a trusted directory and --skip-git-repo-check was not specified.", file=sys.stderr)
             sys.exit(1)
         prompt = sys.stdin.read()
+        if os.environ.get("FAKE_PROMPT_LOG"):   # lets tests see exactly what the assistant received
+            with open(os.environ["FAKE_PROMPT_LOG"], "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"cli": name, "args": args, "prompt": prompt}) + "\n")
         tid = "01a20fdf-0796-7d02-b7ef-05a8bbec3a05"
         if "resume" in rest and os.environ.get("FAKE_CODEX_STALE"):
             print("Error: thread/resume: thread/resume failed: no rollout found for thread id", file=sys.stderr)

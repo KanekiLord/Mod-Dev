@@ -58,6 +58,7 @@ class RunOptions:
     in_git: bool = True
     workdir: str | None = None
     extra_dirs: list[str] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)   # files attached by the user (e.g. a captured video frame)
 
 
 def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
@@ -108,7 +109,13 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
         cmd += ["--mcp-config", str(opts.desktop["config_file"])]
         if not opts.mcp:
             cmd.append("--strict-mcp-config")  # only the Studio's desktop server, none of the user's MCPs
-    for d in opts.extra_dirs:
+    import os as _os
+    dirs = list(opts.extra_dirs)
+    for img in opts.images:   # Claude opens attached images with its Read tool: allow just their folder
+        folder = _os.path.dirname(_os.path.abspath(img))
+        if folder not in dirs:
+            dirs.append(folder)
+    for d in dirs:
         cmd += ["--add-dir", d]
     if opts.resume and (not caps.flags or caps.has("--resume") or caps.has("-r")):
         cmd += ["--resume", opts.resume]
@@ -129,6 +136,9 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
     if opts.resume:
         cmd += ["resume", opts.resume]
     structured = not caps.flags or caps.has("--json")
+    if opts.images and structured and (not caps.flags or caps.has("--image") or caps.has("-i")):
+        for img in opts.images:   # always followed by --json, so the variadic option never eats the prompt "-"
+            cmd += ["--image", img]
     if structured:
         cmd.append("--json")
     if not opts.resume:  # resume inherits the original sandbox/cwd

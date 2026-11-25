@@ -29,7 +29,7 @@ from ..cli.runner import run_agent
 from ..inventory import Inventory, scan, suggest_agents
 from ..messages import Intent
 from ..paths import check_project_folder
-from ..prompts import fix_prompt, parse_verdict, review_prompt, task_prompt
+from ..prompts import attached_context, fix_prompt, parse_verdict, review_prompt, task_prompt
 from ..quality import Check, run_checks, summarize, tests_passed
 from ..store import Store
 from ..vault.index import VaultIndex, context_block
@@ -179,7 +179,8 @@ class Engine:
 
     # ----------------------------------------------------------------- queue
     def submit(self, pid: int, intent: Intent, *, write: bool = False, web: bool = True, commands: bool = False,
-               mcp: bool = False, run_tests: bool = False, autonomous: bool = False, desktop: bool = False) -> int:
+               mcp: bool = False, run_tests: bool = False, autonomous: bool = False, desktop: bool = False,
+               context: str = "", attachments: list[str] | None = None) -> int:
         if autonomous:
             # autonomous = everything needed to finish the task without asking (Git restore point first)
             write = commands = run_tests = True
@@ -189,7 +190,8 @@ class Engine:
             write, commands, desktop, autonomous, run_tests = True, True, True, False, False
         tid = self.store.enqueue(pid, intent.target, intent.text, intent.kind, allow_write=write, allow_web=web,
                                  allow_commands=commands, allow_mcp=mcp, run_tests=run_tests, autonomous=autonomous,
-                                 desktop=desktop and intent.target != "paralelo")
+                                 desktop=desktop and intent.target != "paralelo", context=context,
+                                 attachments=attachments)
         self.store.append_event(tid, "user", intent.text, "user")
         if intent.kind == "idea":
             ob = self.outbox(pid)
@@ -279,6 +281,14 @@ class Engine:
         if self.store.is_pc(pid):
             return ""  # personal-assistant tasks use the whole screen (other apps, WhatsApp, calendar…)
         return str(self.setting("desktop.window") or "").strip()
+
+    @staticmethod
+    def _images(task: dict) -> list[str]:
+        try:
+            items = json.loads(task.get("attachments") or "[]")
+        except ValueError:
+            return []
+        return [p for p in items if isinstance(p, str) and Path(p).is_file()]
 
     def _pc_dirs(self, pid: int) -> list[str]:
         if not self.store.is_pc(pid):
@@ -450,6 +460,7 @@ class Engine:
             except Exception:
                 agents = []
         return {"project": f"{proj['name']} ({proj['directory']})", "memory": self.memory_for(pid, task["title"]),
+                "extra": attached_context(task.get("context") or "", self._images(task)),
                 "autonomous": bool(task.get("autonomous")),
                 "desktop": self._desktop_window(pid) if task.get("desktop") else None,
                 "pc": self.store.is_pc(pid),
@@ -468,7 +479,7 @@ class Engine:
         resume = self.store.session(pid, agent) if self.setting("session.continue") else None
         opts = RunOptions(write=write, commands=bool(task["allow_commands"]), web=bool(task["allow_web"]),
                           autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
-                          pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid),
+                          pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid), images=self._images(task),
                           mcp=bool(task["allow_mcp"]), resume=resume, in_git=in_git, workdir=str(cwd),
                           model=self.setting(f"models.{agent}") or None)
         self.store.set_stage(task["id"], "execucao")
@@ -503,7 +514,7 @@ class Engine:
         max_cycles = max(1, min(5, int(self.setting("team.max_cycles"))))
         impl_opts = RunOptions(write=write, commands=commands, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                                autonomous=bool(task.get("autonomous")), desktop=self._desktop_opts(pid, task),
-                               pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid),
+                               pc=self.store.is_pc(pid), extra_dirs=self._pc_dirs(pid), images=self._images(task),
                                in_git=in_git, workdir=str(cwd), model=self.setting(f"models.{impl}") or None)
         rev_opts = RunOptions(write=False, commands=False, web=bool(task["allow_web"]), mcp=bool(task["allow_mcp"]),
                               in_git=in_git, workdir=str(cwd), model=self.setting("models.review") or None)
