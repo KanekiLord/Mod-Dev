@@ -307,18 +307,8 @@ class Engine:
         return result
 
     def _record_claude_limit(self, info: dict) -> None:
-        payload = {"raw": info, "status": info.get("status"), "windows": {}}
-        for name, win in (info.get("unifiedWindows") or {}).items():
-            if isinstance(win, dict) and win.get("utilization") is not None:
-                payload["windows"][name] = {"used_percent": round(float(win["utilization"]) * 100, 1),
-                                            "resets_at": win.get("resetsAt")}
-        if info.get("rateLimitType") and info.get("utilization") is not None:
-            payload["windows"].setdefault(info["rateLimitType"], {"used_percent": round(float(info["utilization"]) * 100, 1),
-                                                                  "resets_at": info.get("resetsAt")})
-        if info.get("status") == "rejected":
-            payload["blocked"] = True
-            payload["blocked_until"] = info.get("resetsAt")
-        self.store.save_usage("claude", "Claude Code (stream-json rate_limit_event)", payload)
+        from ..usage import claude_payload
+        self.store.save_usage("claude", "Claude Code (stream-json rate_limit_event)", claude_payload(info))
         self.emit("usage", agent="claude")
 
     def _capture_learnings(self, pid: int, tid: int, agent: str, text: str) -> None:

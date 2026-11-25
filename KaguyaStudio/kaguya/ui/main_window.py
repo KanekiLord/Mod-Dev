@@ -125,6 +125,11 @@ class MainWindow(QMainWindow):
         self.task_started_at: float | None = None
         self._build()
         self.voice = VoiceController(self)
+        self._codex_busy = False
+        self._limits_timer = QTimer(self, interval=10 * 60 * 1000)
+        self._limits_timer.timeout.connect(lambda: self.refresh_codex_limits())
+        self._limits_timer.start()
+        QTimer.singleShot(3500, lambda: self.refresh_codex_limits())
         self._timer = QTimer(self, interval=220)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
@@ -208,7 +213,6 @@ class MainWindow(QMainWindow):
             self.nav_group.addButton(b)
             self.nav_buttons[key] = b
             lay.addWidget(b)
-        self.queue_badge = Pill("0", C["violet"])
         lay.addSpacing(14)
         lay.addWidget(self.side_titles[1])
         lay.addSpacing(4)
@@ -247,6 +251,11 @@ class MainWindow(QMainWindow):
         self.p_git = Pill("", C["muted"])
         self.p_vault = Pill("", C["muted"])
         row.addWidget(self.p_git)
+        self.p_git_btn = button("Criar repositório Git", "git", tip="Cria um repositório Git nesta pasta para as IAs "
+                                "poderem editar com segurança (dá para desfazer qualquer alteração)")
+        self.p_git_btn.clicked.connect(self.create_git_repo)
+        self.p_git_btn.hide()
+        row.addWidget(self.p_git_btn)
         row.addWidget(self.p_vault)
         edit = button("", "edit", "ghost", "Editar projeto (pastas, vault, testes)")
         edit.clicked.connect(self.edit_project)
@@ -428,6 +437,15 @@ class MainWindow(QMainWindow):
             if not self.store.effective_vault(self.pid):
                 self.toast("Projeto vinculado. Agora conecte o Segundo Cérebro (opcional) em Segundo Cérebro.")
 
+    def create_git_repo(self):
+        if self.pid is None:
+            return
+        from .dialogs import GitInitDialog
+        dlg = GitInitDialog(self.store.project(self.pid)["directory"], self)
+        if dlg.exec():
+            self.refresh_header()
+            self.toast("Repositório Git criado. Agora as IAs podem editar com 'Alterar arquivos' (e tudo pode ser desfeito).")
+
     def edit_project(self):
         if self.pid is None:
             self.add_project()
@@ -472,7 +490,8 @@ class MainWindow(QMainWindow):
             return
         p = self.store.project(self.pid)
         self.p_name.setText(p["name"])
-        self.p_path.setText(p["directory"])
+        self.p_path.setText(self.p_path.fontMetrics().elidedText(p["directory"], Qt.ElideMiddle, 340))
+        self.p_path.setToolTip(f"Abrir a pasta do projeto\n{p['directory']}")
         chk = check_project_folder(p["directory"])
         if not chk.ok:
             self.p_git.set("pasta indisponível", C["danger"])
@@ -480,6 +499,7 @@ class MainWindow(QMainWindow):
             self.p_git.set("Git ✓" if chk.is_git_root else "Git (subpasta)", C["success"])
         else:
             self.p_git.set("sem Git: só leitura", C["warning"])
+        self.p_git_btn.setVisible(chk.ok and not chk.git_root)
         vault = self.store.effective_vault(self.pid)
         if vault and Path(vault).is_dir():
             self.p_vault.set("Obsidian ✓" + (" (próprio)" if p.get("vault") else ""), C["violet"])
@@ -517,10 +537,12 @@ class MainWindow(QMainWindow):
             elif a == "codex" and stored and stored["payload"].get("available"):
                 windows = [(w["name"], w["used_percent"]) for w in stored["payload"].get("windows", [])]
             if windows:
-                name, used = windows[0]
-                meter.set_value(used)
-                txt.setText(f"{100 - used:.0f}% • {name.split(' ')[-1] if '5' not in name else '5 h'}")
-                txt.setToolTip("\n".join(f"{n}: {u:.0f}% usado" for n, u in windows))
+                short = [("5 h" if ("5 hora" in n or "5 h" in n) else "sem." if "7 dias" in n or "Semanal" in n else n[:8], u)
+                         for n, u in windows]
+                meter.set_value(short[0][1])
+                txt.setText("  ".join(f"{n} {100 - u:.0f}%" for n, u in short[:2]))
+                txt.setToolTip("Restante por janela (fonte oficial):\n" +
+                               "\n".join(f"{n}: {u:.0f}% usado, {100 - u:.0f}% restante" for n, u in windows))
             else:
                 meter.set_value(None)
                 txt.setText("indisponível")
@@ -626,6 +648,91 @@ class MainWindow(QMainWindow):
             run_bg(lambda a=a: self.engine.diagnose(a, cwd), lambda d: (self.refresh_status(),
                    self.diag.refresh() if self.stack.currentWidget() is self.diag else None))
 
+    # ------------------------------------------------------------------ limits
+    def _attempt(self, agent: str, ok: bool, message: str = ""):
+        from datetime import datetime as _dt
+        self.store.set_setting(f"usage.{agent}.last_attempt", {"when": _dt.now().strftime("%d/%m %H:%M"), "ok": ok,
+                                                                "message": message})
+
+    def refresh_codex_limits(self, on_done=None, notify: bool = False):
+        """Free official query (no model usage). Runs at startup, every 10 min and after Codex tasks."""
+        from ..cli import discovery
+        from ..usage import read_codex_limits
+        if self._codex_busy:
+            return
+        diag = self.engine.diagnoses.get("codex")
+        exe = diag.executable if diag and diag.executable else discovery.find_cli("codex", self.store.get_setting("cli.codex.path"))[0]
+        if not exe:
+            self._attempt("codex", False, "Codex não encontrado (veja Diagnóstico).")
+            if on_done:
+                on_done()
+            return
+        self._codex_busy = True
+
+        def done(snap):
+            self._codex_busy = False
+            if snap.available:
+                self.store.save_usage("codex", snap.source, snap.to_dict())
+            self._attempt("codex", snap.available, snap.message)
+            self.refresh_side_panels()
+            if notify:
+                self.toast("Limites do Codex atualizados." if snap.available else f"Codex: {snap.message[:160]}")
+            if on_done:
+                on_done()
+
+        def fail(exc, tb):
+            self._codex_busy = False
+            self._attempt("codex", False, str(exc))
+            if on_done:
+                on_done()
+        run_bg(lambda: read_codex_limits(exe, env=self.engine.env), done, fail)
+
+    def refresh_claude_limits(self, on_done=None):
+        """Claude has no free query: one minimal message returns the official utilisation."""
+        from ..usage import probe_claude_limits
+        if not self.store.get_setting("limits.claude_probe_ok", False):
+            box = QMessageBox(QMessageBox.Question, "Atualizar limites do Claude",
+                              "O Claude Code só informa a utilização da assinatura depois de uma resposta. Para atualizar "
+                              "agora, o Studio envia UMA mensagem mínima (\"ok\", modelo mais leve, sem ferramentas), que "
+                              "consome uma fração muito pequena da cota.\n\nDurante as tarefas isso é automático.", parent=self)
+            yes = box.addButton("Atualizar", QMessageBox.AcceptRole)
+            always = box.addButton("Atualizar e não perguntar de novo", QMessageBox.AcceptRole)
+            box.addButton("Cancelar", QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() not in (yes, always):
+                if on_done:
+                    on_done()
+                return
+            if box.clickedButton() is always:
+                self.store.set_setting("limits.claude_probe_ok", True)
+        try:
+            exe, caps = self.engine.ensure_ready("claude", None)
+        except Exception as exc:
+            self._attempt("claude", False, str(exc))
+            self.toast(f"Claude não está pronto: {str(exc)[:160]}")
+            if on_done:
+                on_done()
+            return
+        cwd = self.store.project(self.pid)["directory"] if self.pid is not None else str(self.engine.home)
+
+        def done(payload):
+            if payload:
+                self.store.save_usage("claude", "Claude Code (rate_limit_event • consulta mínima)", payload)
+                self._attempt("claude", True)
+                self.toast("Limites do Claude atualizados.")
+            else:
+                self._attempt("claude", False, "O Claude Code respondeu sem dados de utilização.")
+            self.refresh_side_panels()
+            if on_done:
+                on_done()
+
+        def fail(exc, tb):
+            self._attempt("claude", False, str(exc))
+            self.toast(f"Claude: {str(exc)[:160]}")
+            if on_done:
+                on_done()
+        run_bg(lambda: probe_claude_limits(exe, caps, cwd, env=self.engine.env), done, fail)
+
     # ------------------------------------------------------------------ events
     def on_event(self, ev: dict):
         if ev.get("_engine") != self._engine_tag:
@@ -679,6 +786,7 @@ class MainWindow(QMainWindow):
             self.refresh_side_panels()
             self.refresh_projects()
             self.refresh_status()
+            self.refresh_codex_limits()
             if self.stack.currentWidget() is self.queue:
                 self.queue.refresh()
         elif t in ("queued", "worker_idle"):

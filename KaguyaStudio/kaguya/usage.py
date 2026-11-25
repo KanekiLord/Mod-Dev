@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 import json
 import os
+from pathlib import Path
 import queue
 import subprocess
 import threading
@@ -126,9 +127,12 @@ class AppServerClient:
                 self.responses.put(msg)
 
     def request(self, method: str, params: dict | None = None) -> dict:
+        """``params=None`` omits the field (older Codex versions expect *unit* params)."""
         self._next += 1
         rid = self._next
-        payload = {"id": rid, "method": method, "params": params or {}}
+        payload = {"id": rid, "method": method}
+        if params is not None:
+            payload["params"] = params
         assert self.proc.stdin is not None
         self.proc.stdin.write(json.dumps(payload) + "\n")
         self.proc.stdin.flush()
@@ -160,27 +164,50 @@ class AppServerClient:
                 pass
 
 
-def codex_snapshot_from_response(result: dict, plan: str = "") -> UsageSnapshot:
-    snap = UsageSnapshot("codex", True, "Codex app-server • account/rateLimits/read", captured_at=time.time(), plan=plan)
+def _g(d: dict, *keys, default=None):
+    """First present key (camelCase in new Codex, snake_case in older versions/rollouts)."""
+    for k in keys:
+        if isinstance(d, dict) and d.get(k) is not None:
+            return d[k]
+    return default
+
+
+def _window_from(w: dict, fallback: str, ref_time: float | None = None) -> Window | None:
+    used = _g(w, "usedPercent", "used_percent")
+    if used is None:
+        return None
+    minutes = _g(w, "windowDurationMins", "window_minutes", "windowMinutes")
+    resets = _g(w, "resetsAt", "resets_at")
+    if resets is None and _g(w, "resets_in_seconds", "resetsInSeconds") is not None:
+        resets = (ref_time or time.time()) + float(_g(w, "resets_in_seconds", "resetsInSeconds"))
+    return Window(_window_label(minutes, fallback), float(used), float(resets) if resets else None, minutes)
+
+
+def codex_snapshot_from_response(result: dict, plan: str = "", source: str = "Codex app-server • account/rateLimits/read",
+                                 captured_at: float | None = None) -> UsageSnapshot:
+    snap = UsageSnapshot("codex", True, source, captured_at=captured_at or time.time(), plan=plan)
     buckets = []
-    by_id = result.get("rateLimitsByLimitId") or {}
+    by_id = _g(result, "rateLimitsByLimitId", "rate_limits_by_limit_id") or {}
     if isinstance(by_id, dict) and by_id:
         buckets = list(by_id.values())
-    elif result.get("rateLimits"):
-        buckets = [result["rateLimits"]]
+    elif _g(result, "rateLimits", "rate_limits"):
+        buckets = [_g(result, "rateLimits", "rate_limits")]
+    elif _g(result, "primary"):
+        buckets = [result]
     for b in buckets:
         if not isinstance(b, dict):
             continue
-        label = b.get("limitName") or ""
+        label = _g(b, "limitName", "limit_name", default="") or ""
         for key, fallback in (("primary", "Janela principal"), ("secondary", "Janela secundária")):
             w = b.get(key)
-            if isinstance(w, dict) and w.get("usedPercent") is not None:
-                name = _window_label(w.get("windowDurationMins"), fallback)
-                if label and len(buckets) > 1:
-                    name = f"{label} • {name}"
-                snap.windows.append(Window(name, float(w["usedPercent"]), w.get("resetsAt"), w.get("windowDurationMins")))
-        snap.plan = snap.plan or str(b.get("planType") or "")
-        if b.get("rateLimitReachedType"):
+            if isinstance(w, dict):
+                win = _window_from(w, fallback, captured_at)
+                if win:
+                    if label and len(buckets) > 1:
+                        win.name = f"{label} • {win.name}"
+                    snap.windows.append(win)
+        snap.plan = snap.plan or str(_g(b, "planType", "plan_type", default="") or "")
+        if _g(b, "rateLimitReachedType", "rate_limit_reached_type"):
             snap.blocked = True
     if result.get("ordinaryUsageAllowed") is False:
         snap.blocked = True
@@ -190,7 +217,68 @@ def codex_snapshot_from_response(result: dict, plan: str = "") -> UsageSnapshot:
     return snap
 
 
+def codex_home(env: dict | None = None) -> Path:
+    env = env or os.environ
+    return Path(env.get("CODEX_HOME") or (Path.home() / ".codex"))
+
+
+def read_codex_rollout_limits(home: Path | None = None, max_files: int = 12) -> UsageSnapshot:
+    """Latest rate-limit snapshot the official Codex wrote in its own session logs
+    (``~/.codex/sessions/AAAA/MM/DD/rollout-*.jsonl``). Local file, no credentials involved."""
+    base = Path(home or codex_home()) / "sessions"
+    files = sorted(base.glob("*/*/*/rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:max_files] \
+        if base.is_dir() else []
+    for f in files:
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if "rate_limits" not in line and "rateLimits" not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            payload = obj.get("payload") or obj.get("msg") or obj
+            limits = _g(payload, "rate_limits", "rateLimits")
+            if not isinstance(limits, dict):
+                continue
+            ts = obj.get("timestamp")
+            when = None
+            if isinstance(ts, str):
+                try:
+                    when = datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    when = None
+            snap = codex_snapshot_from_response({"rateLimits": limits}, source="Codex • registro da última sessão oficial",
+                                                captured_at=when or f.stat().st_mtime)
+            if snap.windows:
+                return snap
+    return UsageSnapshot("codex", False, "Codex • registro local",
+                         message="Nenhuma sessão do Codex com dados de uso encontrada neste computador.")
+
+
+def _request_compat(client: "AppServerClient", method: str, params: dict | None) -> dict:
+    res = client.request(method, params)
+    err = str((res.get("error") or {}).get("message", ""))
+    if "invalid type" in err or "missing field `params`" in err:
+        res = client.request(method, None if params is not None else {})
+    return res
+
+
 def read_codex_limits(executable: str, env: dict | None = None, timeout: float = 25) -> UsageSnapshot:
+    live = _read_codex_app_server(executable, env, timeout)
+    if live.available or "sem login" in live.message or "API key" in live.message:
+        return live
+    local = read_codex_rollout_limits(codex_home(env))
+    if local.available:
+        local.message = f"Consulta direta indisponível ({live.message[:120]}); usando o registro oficial local."
+        return local
+    return live
+
+
+def _read_codex_app_server(executable: str, env: dict | None, timeout: float) -> UsageSnapshot:
     try:
         client = AppServerClient(executable, env, timeout)
     except OSError as exc:
@@ -202,7 +290,7 @@ def read_codex_limits(executable: str, env: dict | None = None, timeout: float =
             return UsageSnapshot("codex", False, "Codex app-server", message="initialize: " + str(init["error"].get("message")))
         client.notify("initialized")
         plan = ""
-        acct = client.request("account/read", {"refreshToken": False})
+        acct = _request_compat(client, "account/read", {"refreshToken": False})
         account = (acct.get("result") or {}).get("account") if "result" in acct else None
         if isinstance(account, dict):
             plan = str(account.get("planType") or "")
@@ -212,16 +300,51 @@ def read_codex_limits(executable: str, env: dict | None = None, timeout: float =
         if "result" in acct and account is None:
             return UsageSnapshot("codex", False, "Codex app-server • account/read",
                                  message="Codex sem login de conta ChatGPT: faça 'codex login'.")
-        res = client.request("account/rateLimits/read", {"excludeResetCreditDetails": True})
+        # No params: accepted by older versions (unit) and by newer ones (nullable params).
+        res = _request_compat(client, "account/rateLimits/read", None)
         if "error" in res:
             return UsageSnapshot("codex", False, "Codex app-server • account/rateLimits/read",
                                  message=str(res["error"].get("message", "erro")))
         return codex_snapshot_from_response(res.get("result") or {}, plan)
     except (TimeoutError, OSError, ValueError) as exc:
         return UsageSnapshot("codex", False, "Codex app-server",
-                             message=f"Indisponível nesta versão do Codex ou sem resposta ({exc}). Use /status.")
+                             message=f"Sem resposta do Codex ({exc}).")
     finally:
         client.close()
+
+
+def claude_payload(info: dict) -> dict:
+    """Normalise a Claude Code ``rate_limit_event`` (utilization 0..1) for storage."""
+    payload = {"raw": info, "status": info.get("status"), "windows": {}}
+    for name, win in (info.get("unifiedWindows") or {}).items():
+        if isinstance(win, dict) and win.get("utilization") is not None:
+            payload["windows"][name] = {"used_percent": round(float(win["utilization"]) * 100, 1),
+                                        "resets_at": win.get("resetsAt")}
+    if info.get("rateLimitType") and info.get("utilization") is not None:
+        payload["windows"].setdefault(info["rateLimitType"], {"used_percent": round(float(info["utilization"]) * 100, 1),
+                                                              "resets_at": info.get("resetsAt")})
+    if info.get("status") == "rejected":
+        payload["blocked"] = True
+        payload["blocked_until"] = info.get("resetsAt")
+    return payload
+
+
+def probe_claude_limits(executable: str, caps, cwd: Path, env: dict | None = None, timeout_s: float = 120) -> dict | None:
+    """One minimal message (cheapest model, no tools) so Claude Code returns its official
+    ``rate_limit_event``. Spends a tiny part of the subscription: the UI asks first."""
+    from .cli.runner import run_command
+    cmd = [executable, "-p", "--output-format", "stream-json", "--verbose", "--model", "haiku",
+           "--permission-mode", "dontAsk" if (not caps.flags or caps.mentions("dontAsk")) else "default"]
+    if not caps.flags or caps.has("--tools"):
+        cmd += ["--tools", ""]
+    if not caps.flags or caps.has("--no-session-persistence"):
+        cmd.append("--no-session-persistence")
+    res = run_command("claude", cmd, Path(cwd), "Responda apenas: ok", lambda e: None, env=env, timeout_s=timeout_s)
+    if res.rate_limits:
+        return claude_payload(res.rate_limits[-1])
+    if not res.ok:
+        raise RuntimeError(res.failure_reason() or "O Claude Code não respondeu.")
+    return None
 
 
 def claude_snapshot(stored: dict | None) -> UsageSnapshot:

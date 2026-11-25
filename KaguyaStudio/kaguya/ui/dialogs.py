@@ -245,3 +245,84 @@ class TextDialog(QDialog):
         close = button("Fechar", kind="ghost")
         close.clicked.connect(self.accept)
         lay.addWidget(close, 0, Qt.AlignRight)
+
+
+class GitInitDialog(QDialog):
+    """Explains and creates a Git repository for the project folder."""
+
+    def __init__(self, folder: str, parent=None):
+        super().__init__(parent)
+        from ..gitsetup import git_available, global_identity
+        self.folder = folder
+        self.setWindowTitle("Criar repositório Git")
+        self.setMinimumWidth(560)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(22, 20, 22, 18)
+        lay.setSpacing(10)
+        lay.addWidget(label("Criar repositório Git", "h1"))
+        lay.addWidget(label(f"Pasta: <b>{folder}</b>", wrap=True))
+        lay.addWidget(label("Com Git, cada alteração das IAs fica registrada e pode ser desfeita. Seus arquivos não são "
+                            "movidos nem apagados; é criada apenas a pasta oculta <code>.git</code>.", "muted", wrap=True))
+        self.ok_git = git_available()
+        if not self.ok_git:
+            lay.addWidget(label("O Git não está instalado neste computador. Instale o <b>Git for Windows</b> "
+                                "(opções padrão do instalador), feche e reabra o Studio.", wrap=True))
+            row = QHBoxLayout()
+            row.addStretch(1)
+            dl = button("Baixar Git for Windows", "external", "primary")
+            dl.clicked.connect(lambda: __import__("kaguya.ui.common", fromlist=["open_url"]).open_url("https://git-scm.com/download/win"))
+            close = button("Fechar", kind="ghost")
+            close.clicked.connect(self.reject)
+            row.addWidget(close)
+            row.addWidget(dl)
+            lay.addLayout(row)
+            return
+        from PySide6.QtWidgets import QCheckBox
+        self.c_ignore = QCheckBox("Criar .gitignore para mods (ignora build/, run/, .gradle/, logs e arquivos de IDE)")
+        self.c_ignore.setChecked(True)
+        self.c_commit = QCheckBox("Fazer o commit inicial (fotografia do estado atual do projeto)")
+        self.c_commit.setChecked(True)
+        lay.addWidget(self.c_ignore)
+        lay.addWidget(self.c_commit)
+        name, email = global_identity()
+        self.name = QLineEdit(name)
+        self.name.setPlaceholderText("Seu nome (aparece no histórico)")
+        self.email = QLineEdit(email)
+        self.email.setPlaceholderText("Seu e-mail (pode ser qualquer um; fica só no histórico local)")
+        if not (name and email):
+            lay.addWidget(label("IDENTIDADE DOS COMMITS (só deste projeto)", "section"))
+            lay.addWidget(self.name)
+            lay.addWidget(self.email)
+        self.out = label("", wrap=True)
+        lay.addWidget(self.out)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = button("Cancelar", kind="ghost")
+        cancel.clicked.connect(self.reject)
+        self.go = button("Criar repositório", "git", "primary")
+        self.go.clicked.connect(self.run)
+        row.addWidget(cancel)
+        row.addWidget(self.go)
+        lay.addLayout(row)
+
+    def run(self):
+        from ..gitsetup import init_repository
+        self.go.setEnabled(False)
+        self.out.setText("Criando…")
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+        res = init_repository(Path(self.folder), gitignore=self.c_ignore.isChecked(), first_commit=self.c_commit.isChecked(),
+                              name=self.name.text(), email=self.email.text())
+        lines = "<br>".join(f"✓ {s}" for s in res.steps)
+        if res.error:
+            lines += f"<br><span style='color:{C['danger'] if not res.ok else C['warning']}'>⚠ {res.error}</span>"
+        self.out.setText(lines)
+        if res.ok and not res.error:
+            self.accept()
+        else:
+            self.go.setEnabled(not res.ok)
+            if res.ok:
+                self.go.setText("Fechar")
+                self.go.setEnabled(True)
+                self.go.clicked.disconnect()
+                self.go.clicked.connect(self.accept)

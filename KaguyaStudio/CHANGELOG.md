@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.0.2 — 25/11/2026
+
+### Corrigido
+- **Janela extra pequena** com "0": um selo sem lugar na tela virava janela própria. Removido; selos sem
+  janela-mãe nunca mais são exibidos sozinhos.
+- **Limites do Codex**: "invalid type: map, expected unit" — versões anteriores do Codex exigem a consulta sem
+  parâmetros. Agora a consulta é compatível com versões antigas e novas e, se mesmo assim não houver resposta,
+  usa o registro oficial que o Codex grava em `~/.codex/sessions`.
+- **Limites não atualizavam**: Codex é consultado ao abrir, a cada 10 min e após cada tarefa (sem gastar cota);
+  um dado antigo válido não é mais apagado por uma tentativa que falhou; o painel mostra hora e motivo da última tentativa.
+- **Claude**: "Atualizar agora" envia uma mensagem mínima (pergunta antes) para obter a utilização oficial;
+  durante tarefas continua automático.
+
+### Novo
+- Botão **Criar repositório Git** no projeto (git init, `.gitignore` para mods sem sobrescrever, commit inicial opcional).
+
 ## 4.0.1 — 25/11/2026
 
 ### Corrigido

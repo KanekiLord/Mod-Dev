@@ -131,41 +131,40 @@ class UsageCard(Card):
             self.state.set("não verificado", C["muted"])
 
     def load_cached(self):
+        from ..usage import UsageSnapshot, Window
         if self.agent == "claude":
-            self.show_snapshot(claude_snapshot(self.win.store.latest_usage("claude")))
+            snap = claude_snapshot(self.win.store.latest_usage("claude"))
+            if not snap.available:
+                snap.message = ("Ainda não há dado oficial. Clique em 'Atualizar agora' (envia 1 mensagem mínima) ou "
+                                "rode uma tarefa: o Claude Code informa a utilização a cada resposta.")
         else:
             stored = self.win.store.latest_usage("codex")
-            if stored:
-                from ..usage import UsageSnapshot, Window
+            if stored and stored["payload"].get("available"):
                 p = stored["payload"]
-                snap = UsageSnapshot("codex", p.get("available", False), p.get("source", ""), [Window(**w) for w in p.get("windows", [])],
+                snap = UsageSnapshot("codex", True, p.get("source", ""), [Window(**w) for w in p.get("windows", [])],
                                      p.get("plan", ""), p.get("captured_at"), p.get("message", ""), p.get("blocked", False))
-                self.show_snapshot(snap)
             else:
-                from ..usage import UsageSnapshot
-                self.show_snapshot(UsageSnapshot("codex", False, "", message="Clique em 'Atualizar agora' para consultar o Codex."))
+                snap = UsageSnapshot("codex", False, "", message="Clique em 'Atualizar agora' para consultar o Codex.")
+        self.show_snapshot(snap)
+        last = self.win.store.get_setting(f"usage.{self.agent}.last_attempt")
+        if last:
+            state = "ok" if last.get("ok") else "falhou: " + last.get("message", "")[:220]
+            self.source.setText((self.source.text() + "\n" if self.source.text() else "") +
+                                f"Última tentativa {last.get('when', '')}: {state}")
         self.refresh_local()
 
     def fetch(self):
-        if self.agent == "claude":
-            self.load_cached()
-            self.win.toast("O Claude Code envia a utilização durante as tarefas; o painel mostra o último dado recebido.")
-            return
-        diag = self.win.engine.diagnoses.get("codex")
-        exe = diag.executable if diag and diag.executable else discovery.find_cli("codex", self.win.store.get_setting("cli.codex.path"))[0]
-        if not exe:
-            self.win.toast("Codex não encontrado. Veja Diagnóstico.")
-            return
         self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("Atualizando…")
 
-        def done(snap):
+        def done(_=None):
             self.refresh_btn.setEnabled(True)
-            payload = snap.to_dict()
-            self.win.store.save_usage("codex", snap.source, payload)
-            self.show_snapshot(snap)
-            self.refresh_local()
-        run_bg(lambda: read_codex_limits(exe, env=self.win.engine.env), done,
-               lambda e, tb: (self.refresh_btn.setEnabled(True), self.win.toast(f"Falha: {e}")))
+            self.refresh_btn.setText("Atualizar agora")
+            self.load_cached()
+        if self.agent == "claude":
+            self.win.refresh_claude_limits(done)
+        else:
+            self.win.refresh_codex_limits(done, notify=True)
 
     def open_terminal(self):
         diag = self.win.engine.diagnoses.get(self.agent)
