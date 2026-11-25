@@ -160,33 +160,30 @@ class HeavyInstall(unittest.TestCase):
 
     def setUp(self):
         import os
-        import stat
         from unittest import mock
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name) / "dados"
-        bindir = Path(self.tmp.name) / "bin"
-        bindir.mkdir()
         self.calls = Path(self.tmp.name) / "uv_calls.txt"
-        uv = bindir / "uv"
-        uv.write_text(f"""#!{sys.executable}
-import os, sys
+        fake = Path(self.tmp.name) / "fake_uv.py"
+        fake.write_text(f"""import os, sys
 from pathlib import Path
 open({str(self.calls)!r}, "a").write(" ".join(sys.argv[1:]) + "\\n")
 if sys.argv[1] == "venv":
-    b = Path(sys.argv[2]) / "bin"; b.mkdir(parents=True, exist_ok=True)
-    (b / "python").symlink_to({sys.executable!r})
+    (Path(sys.argv[2]) / "lib").mkdir(parents=True, exist_ok=True)
     print("criado")
 elif sys.argv[1] == "pip":
     print("instalando " + sys.argv[-1])
     if os.environ.get("FAKE_UV_FAIL"): sys.exit(3)
     if os.environ.get("FAKE_UV_SLEEP"):
         import time; time.sleep(float(os.environ["FAKE_UV_SLEEP"]))
-""")
-        uv.chmod(uv.stat().st_mode | stat.S_IEXEC)
-        for p in (mock.patch.dict(os.environ, {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-                                                "KAGUYA_TTS_WORKER_FAKE": "1"}),
-                  mock.patch("sys.platform", "linux")):
+""", encoding="utf-8")
+        from kaguya.voice import heavy
+        # the stand-in runs through this Python on every system (Windows cannot run a script named "uv"),
+        # and the environment's interpreter is this Python too (the worker's test double needs only numpy)
+        for p in (mock.patch.dict(os.environ, {"KAGUYA_TTS_WORKER_FAKE": "1"}),
+                  mock.patch.object(heavy.Installer, "uv_command", lambda _self: [sys.executable, str(fake)]),
+                  mock.patch.object(heavy, "venv_python", lambda _home, _eid: Path(sys.executable))):
             p.start()
             self.addCleanup(p.stop)
 
@@ -261,7 +258,7 @@ elif sys.argv[1] == "pip":
         with _zip.ZipFile(buf, "w") as z:
             z.writestr("uv.exe", b"MZ adulterado")
         with mock.patch.object(heavy.shutil, "which", return_value=None), \
-                mock.patch.dict(heavy.UV_ASSETS, {"linux": ("uv.zip", "0" * 64)}), \
+                mock.patch.dict(heavy.UV_ASSETS, {sys.platform: ("uv.zip", "0" * 64)}), \
                 mock.patch.object(heavy.urllib.request, "urlopen",
                                   return_value=mock.Mock(read=lambda: buf.getvalue())):
             with self.assertRaises(RuntimeError) as ctx:

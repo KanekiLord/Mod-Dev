@@ -135,6 +135,10 @@ class Installer:
         if code != 0:
             raise RuntimeError(f"comando falhou (código {code})")
 
+    def uv_command(self) -> list[str]:
+        """How to run uv (a list, so tests can run a stand-in through Python on any system)."""
+        return [self.uv()]
+
     def uv(self) -> str:
         found = shutil.which("uv")
         if found:
@@ -161,13 +165,13 @@ class Installer:
 
     def install(self) -> dict:
         self.dir.mkdir(parents=True, exist_ok=True)
-        uv = self.uv()
+        uv = self.uv_command()
         venv = self.dir / "venv"
-        if not venv_python(self.home, self.spec.id).exists():
-            self._run([uv, "venv", str(venv), "--python", "3.12", "--seed"])
+        if not (venv.is_dir() and venv_python(self.home, self.spec.id).exists()):
+            self._run([*uv, "venv", str(venv), "--python", "3.12", "--seed"])
         py = str(venv_python(self.home, self.spec.id))
-        self._run([uv, "pip", "install", "--python", py, "torch", "torchaudio", "--index-url", TORCH_INDEX_CPU])
-        self._run([uv, "pip", "install", "--python", py, *self.spec.packages])
+        self._run([*uv, "pip", "install", "--python", py, "torch", "torchaudio", "--index-url", TORCH_INDEX_CPU])
+        self._run([*uv, "pip", "install", "--python", py, *self.spec.packages])
         self.log("carregando o modelo pela primeira vez (baixa os pesos do Hugging Face)…")
         client = WorkerClient(self.home, self.spec.id, self.spec.model)
         try:
