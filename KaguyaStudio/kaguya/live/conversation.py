@@ -79,7 +79,8 @@ class ClaudeConversation:
         run_env, _ = child_env(self.env)
         self.proc = subprocess.Popen(cmd, cwd=str(self.cwd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                     bufsize=1, env=run_env, creationflags=_flags())
+                                     bufsize=1, env=run_env, creationflags=_flags(),
+                                     start_new_session=(os.name != "nt"))   # own group: kill_tree reaches node
         self._events = queue.Queue()
         proc, events = self.proc, self._events
 
@@ -108,8 +109,9 @@ class ClaudeConversation:
         with self._spawn:
             proc, self.proc = self.proc, None
         if proc is not None and proc.poll() is None:
+            from ..procutil import kill_tree
+            kill_tree(proc)                   # the whole tree: on Windows claude.cmd → node survives a plain kill
             try:
-                proc.kill()
                 proc.wait(5)
             except Exception:
                 pass
@@ -180,7 +182,8 @@ class ClaudeConversation:
                 proc.stdin.close()
                 proc.wait(5)
             except (OSError, subprocess.TimeoutExpired):
-                proc.kill()
+                from ..procutil import kill_tree
+                kill_tree(proc)
                 try:
                     proc.wait(5)
                 except subprocess.TimeoutExpired:

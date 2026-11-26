@@ -64,11 +64,15 @@ def _unchanged(path: Path, base_hash: str | None) -> bool:
         return False
 
 
-def _read_note(path: Path) -> tuple[str, bool]:
-    """(text, had_bom). Invalid bytes raise: the note is never rewritten with replaced characters."""
+def _read_note(path: Path) -> tuple[str, bool, str]:
+    """(text with \\n line breaks, had_bom, the note's own line break). Invalid bytes raise: the note is never
+    rewritten with replaced characters. Line breaks are normalised here and restored on write — reading the
+    raw bytes kept Windows' \\r\\n and the text-mode write doubled every line."""
     raw = Path(path).read_bytes()
     bom = raw.startswith(BOM)
-    return raw[len(BOM):].decode("utf-8") if bom else raw.decode("utf-8"), bom
+    text = raw[len(BOM):].decode("utf-8") if bom else raw.decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text.replace("\r\n", "\n"), bom, newline
 
 
 def _q(v: str) -> str:
@@ -274,7 +278,7 @@ class Outbox:
                                            "Descarte e gere a proposta de novo.")
                         continue
                     try:
-                        cur, bom = _read_note(target)
+                        cur, bom, newline = _read_note(target)
                     except UnicodeDecodeError:
                         self.last_error = (f"“{spec['target']}” tem caracteres inválidos (não é UTF-8): nada foi "
                                            "alterado para não estragar a nota. Abra e salve no Obsidian, depois aprove.")
@@ -282,7 +286,9 @@ class Outbox:
                     self._backup(target, spec["target"])
                     new = self._result(spec, spec["target"], cur, src.read_text(encoding="utf-8"))
                     tmp = target.with_name(target.name + ".kaguya-tmp")
-                    tmp.write_text(new, encoding="utf-8-sig" if bom else "utf-8")   # keeps the note's own format
+                    # exactly the note's own format: BOM and line breaks as they were
+                    tmp.write_bytes(((BOM if bom else b"") + new.replace("\r\n", "\n").replace("\n", newline)
+                                     .encode("utf-8")))
                     os.replace(tmp, target)            # atomic: a crash never leaves half a note
                     dest = target
                 else:

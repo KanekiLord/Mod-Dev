@@ -21,6 +21,8 @@
 - Segundo Cérebro: notas salvas com BOM (alguns editores do Windows) nunca podiam receber atualização; falhas na
   aprovação agora sempre dizem o motivo; nota com caracteres inválidos nunca é reescrita.
 - Escuta por nome: desligar enquanto ainda ligava abria o microfone mesmo assim.
+- (achado pelo CI do Windows antes de chegar a você) aprovar atualização numa nota salva no Windows duplicava as
+  quebras de linha; o Live, ao reiniciar depois de um tempo esgotado, deixava o `node` do Claude aberto.
 
 ## 5.9.1 — 26/11/2026 (verificação completa do código, parte 1)
 

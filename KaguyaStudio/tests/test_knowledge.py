@@ -58,6 +58,18 @@ class Proposals(Base):
         self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))                  # BOM kept
         self.assertIn("RegisterEvent também funciona", raw.decode("utf-8-sig"))
 
+    def test_windows_line_breaks_are_kept_never_doubled(self):
+        self.note.write_bytes(NOTE.replace("\n", "\r\n").encode("utf-8"))   # a note saved on Windows
+        self.idx.update()
+        p = self.ob.stage("pesquisa", "Registro de entidades", "Em 1.20.1 o RegisterEvent também funciona.",
+                          source_url=URL, version="Forge 1.20.1", found_by="Kaguya (Codex)")
+        self.assertEqual(len(self.ob.approve([p.name])), 1, self.ob.last_error)
+        raw = self.note.read_bytes()
+        self.assertNotIn(b"\r\r\n", raw)                                  # it used to double every line
+        self.assertNotIn(b"\n\n\n", raw)
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))              # every break stays \r\n
+        self.assertTrue(raw.startswith(NOTE.replace("\n", "\r\n").encode("utf-8").rstrip(b"\r\n")))
+
     def test_invalid_bytes_are_never_rewritten_and_the_reason_is_shown(self):
         p = self.ob.stage("pesquisa", "Registro de entidades", "Outra informação.", source_url=URL,
                           version="Forge 1.20.1", found_by="Kaguya (Codex)")
