@@ -594,7 +594,8 @@ class SettingsPage(QWidget):
         for k, v in stt.MODELS.items():
             self.stt_model.addItem(f"{k} — {v}", k)
         self.stt_model.setCurrentIndex(list(stt.MODELS).index(win.store.get_setting("voice.model", "small")))
-        self.stt_model.currentIndexChanged.connect(lambda: win.store.set_setting("voice.model", self.stt_model.currentData()))
+        self.stt_model.currentIndexChanged.connect(lambda: (win.store.set_setting("voice.model", self.stt_model.currentData()),
+                                                            self.refresh_packs()))
         vform.addRow("Modelo de transcrição", self.stt_model)
         from ..voice.denoise import LABELS as NOISE_LABELS
         self.noise_combo = QComboBox()
@@ -651,13 +652,24 @@ class SettingsPage(QWidget):
                                   "tira e se o vento está batendo no microfone.", "dim", wrap=True)
         vc.lay.addWidget(self.noise_result)
         self._noise_clip = None
-        self.t_consent = Toggle("Autorizo baixar o modelo de transcrição escolhido (uma vez, fica no computador)",
-                                bool(win.store.get_setting("voice.model_consent", False)))
-        self.t_consent.toggled.connect(lambda v: win.store.set_setting("voice.model_consent", v))
+        # where models and voices are stored (asked on the first download; changeable here, moves what exists)
+        prow = QHBoxLayout()
+        self.packs_info = label("", "dim", wrap=True, selectable=True)
+        prow.addWidget(self.packs_info, 1)
+        self.packs_btn = button("Mudar pasta…", "folder-open", "ghost",
+                                "Escolher outro disco/pasta; o que já está instalado é movido, sem baixar de novo")
+        self.packs_btn.clicked.connect(lambda: __import__("kaguya.ui.packs_ui", fromlist=["x"]).change_packs_dir(
+            win, self.refresh_packs))
+        self.model_btn = button("Baixar modelo agora", "download", "ghost",
+                                "Baixa o modelo de transcrição escolhido (pede confirmação e mostra o progresso)")
+        self.model_btn.clicked.connect(self.download_model)
+        prow.addWidget(self.model_btn)
+        prow.addWidget(self.packs_btn)
+        vc.lay.addLayout(prow)
         self.t_autoread = Toggle("Ler respostas automaticamente", bool(win.store.get_setting("voice.autoread", False)))
         self.t_autoread.toggled.connect(lambda v: win.store.set_setting("voice.autoread", v))
-        vc.lay.addWidget(self.t_consent)
         vc.lay.addWidget(self.t_autoread)
+        self.refresh_packs()
         lay.addWidget(vc)
         # mascots & migration
         mc = Card()
@@ -703,6 +715,19 @@ class SettingsPage(QWidget):
         outer.addWidget(scroll(content), 1)
         self._voices_loaded = False
 
+    def refresh_packs(self):
+        from .. import packs
+        root = self.win.engine.packs
+        model = self.win.store.get_setting("voice.model", "small")
+        have = stt.model_cached(root / "modelos", model)
+        self.packs_info.setText(f"Pacotes de voz e modelos: {root} ({packs.human(packs.free_bytes(root))} livres) • "
+                                f"modelo \"{model}\": " + ("baixado" if have else "ainda não baixado"))
+        self.model_btn.setVisible(not have)
+
+    def download_model(self):
+        from .packs_ui import ensure_stt_model
+        ensure_stt_model(self.win, self.win.store.get_setting("voice.model", "small"), self.refresh_packs)
+
     def save_team(self):
         impl = "codex" if self.impl.currentIndex() == 0 else "claude"
         self.win.store.set_setting("team.implementer", impl)
@@ -718,7 +743,7 @@ class SettingsPage(QWidget):
             self.projects.setItem(r, 1, item(p["directory"]))
             self.projects.setItem(r, 2, item(p.get("vault") or (f"global: {gv}" if gv else "—"), C["muted"]))
             self.projects.setItem(r, 3, item(p.get("test_command") or "automático", C["dim"]))
-        st = stt.status(self.win.engine.home / "modelos", self.win.store.get_setting("voice.model", "small"))
+        st = stt.status(self.win.engine.packs / "modelos", self.win.store.get_setting("voice.model", "small"))
         tts = Speaker.backend()
         parts = [f"Leitura: {tts or 'indisponível neste sistema'}."]
         if st.ready:
@@ -756,6 +781,9 @@ class SettingsPage(QWidget):
             self.neural_btn.show()
 
     def download_neural(self):
+        from .packs_ui import ask_packs_dir
+        if ask_packs_dir(self.win, 130 * 1024 * 1024) is None:     # where to put them (asked once)
+            return
         v = self.win.voice.neural
         self.neural_btn.setEnabled(False)
         self.neural_progress.show()

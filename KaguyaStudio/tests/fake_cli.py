@@ -166,6 +166,12 @@ if name == "claude":
     if args[:2] == ["auth", "status"]:
         if "--help" in args:
             print("Usage: claude auth status [options]\n  --json  --text"); sys.exit(0)
+        if os.environ.get("FAKE_CLAUDE_AUTH_HANG"):
+            # what froze the Studio on Windows: the command never answers and a child holds the output open
+            import subprocess as _sp
+            _sp.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+            import time as _t
+            _t.sleep(120)
         mode = os.environ.get("FAKE_CLAUDE_AUTH", "claude.ai")
         data = {"loggedIn": mode != "none", "authMethod": mode, "apiProvider": "firstParty"}
         if mode == "claude.ai":

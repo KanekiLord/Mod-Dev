@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 from .env import child_env, redact
+from . import procutil
 
 
 @dataclass
@@ -31,7 +32,7 @@ def _no_window() -> int:
 
 
 def _git(repo: Path, *args: str, timeout: int = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8",
+    return procutil.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=timeout, creationflags=_no_window())
 
 
@@ -97,7 +98,7 @@ def run_checks(repo: Path, *, run_tests: bool = False, test_command: str | None 
         return checks
     env, _ = child_env()
     try:
-        p = subprocess.run(cmd, cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        p = procutil.run(cmd, cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=timeout, env=env, creationflags=_no_window())
         checks.append(Check(" ".join(Path(cmd[0]).name if i == 0 else c for i, c in enumerate(cmd)),
                             "PASS" if p.returncode == 0 else "FAIL", redact((p.stdout + "\n" + p.stderr)[-6000:])))

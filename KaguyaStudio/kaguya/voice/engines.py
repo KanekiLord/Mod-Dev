@@ -76,6 +76,9 @@ class KokoroEngine:
     def __init__(self, neural):
         self.neural = neural
 
+    def available(self) -> bool:
+        return self.neural.ready
+
     def probe(self) -> Capabilities:
         from .neural import PRESETS, package_available
         pkg = package_available()
@@ -102,6 +105,10 @@ class WindowsEngine:
 
     def __init__(self, voice_name_getter=None):
         self._names = voice_name_getter
+
+    def available(self) -> bool:
+        from .tts import Speaker
+        return sys.platform == "win32" and Speaker.backend() is not None
 
     def probe(self) -> Capabilities:
         from .tts import Speaker
@@ -134,6 +141,9 @@ class QwenEngine:
     def info(self) -> dict:
         from .heavy import status
         return status(self.home, self.id) if self.home else {}
+
+    def available(self) -> bool:
+        return bool(self.info())
 
     def probe(self) -> Capabilities:
         from .heavy import SPECS
@@ -197,11 +207,16 @@ class VoiceEngines:
                 e.close()
 
     def resolve(self, profile: VoiceProfile):
-        if profile.engine in self.engines and self.engines[profile.engine].probe().installed:
+        """Cheap checks only (it runs for every sentence): probe() can list the Windows voices through
+        PowerShell, which took seconds per sentence and made answers take minutes to be heard."""
+        def ok(e):
+            check = getattr(e, "available", None)
+            return check() if check else e.probe().installed
+        if profile.engine in self.engines and ok(self.engines[profile.engine]):
             return self.engines[profile.engine]
         for eid in ("kokoro", "windows"):   # auto / fallback order: best local voice first
             e = self.engines.get(eid)
-            if e is not None and e.probe().installed:
+            if e is not None and ok(e):
                 return e
         return None
 

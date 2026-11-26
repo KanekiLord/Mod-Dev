@@ -17,6 +17,7 @@ import subprocess
 
 from .cli.discovery import find_cli
 from .env import redact
+from . import procutil
 
 INSTALL_HINT = ("Instale a GitHub CLI: no PowerShell rode 'winget install --id GitHub.cli' (ou baixe em cli.github.com), "
                 "feche e reabra o Studio.")
@@ -31,7 +32,7 @@ def _run(cmd: list[str], cwd: str | Path | None = None, timeout: int = 120, env:
     run_env["GH_PROMPT_DISABLED"] = "1"   # never wait for interactive input
     run_env["GIT_TERMINAL_PROMPT"] = "0"
     run_env["NO_COLOR"] = "1"
-    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, encoding="utf-8",
+    return procutil.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=timeout, env=run_env, stdin=subprocess.DEVNULL, creationflags=_flags())
 
 

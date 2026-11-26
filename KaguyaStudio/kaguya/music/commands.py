@@ -34,6 +34,11 @@ def parse(text: str) -> tuple[str, str] | None:
         return ("volume_down", "")
     if re.fullmatch(rf"(?:aumenta|sobe)(?: o volume)?(?: d?a? ?{_MUSIC})?(?: um pouco)?", n):
         return ("volume_up", "")
+    if re.fullmatch(r"(?:desliga|desligar|tira|tirar|desativa|sai do)(?: o)?(?: modo)? (?:aleatorio|embaralhar|shuffle)", n):
+        return ("shuffle", "off")
+    if re.fullmatch(rf"(?:liga|ligar|ativa|ativar|coloca|poe|bota|deixa|modo|toca)?(?: (?:o|no|em))?(?: modo)? "
+                    rf"?(?:aleatorio|embaralha|embaralhar|shuffle)(?: (?:as )?musicas?)?", n):
+        return ("shuffle", "on")
     if re.fullmatch(r"(?:que|qual) (?:musica|som) (?:e essa|esta tocando|ta tocando)", n):
         return ("status", "")
     m = re.fullmatch(r"(?:coloca|adiciona|bota|poe) (.+?) na fila(?: de musica| da musica)?(?: para depois| pra depois)?", n)

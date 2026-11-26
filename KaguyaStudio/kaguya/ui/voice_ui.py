@@ -21,9 +21,27 @@ class VoiceController(QObject):
         self._speaking_agent = None
         from ..voice.neural import NeuralVoices
         from ..voice.engines import VoiceEngines
-        self.neural = NeuralVoices(self.win.engine.home / "modelos")
-        self.engines = VoiceEngines(self.neural, self._windows_voice, self.win.engine.home)
+        packs = self.win.engine.packs
+        self.neural = NeuralVoices(packs / "modelos")
+        self.engines = VoiceEngines(self.neural, self._windows_voice, packs)
         self.queue = None   # SpeechQueue, created lazily (needs numpy/sounddevice)
+        self.downloading = False
+
+    def close_engines(self):
+        try:
+            self.engines.close()
+        except Exception:
+            pass
+
+    def relocate(self):
+        """The packs folder changed: models and voices are looked up in the new place."""
+        from ..voice.neural import NeuralVoices
+        from ..voice.engines import VoiceEngines
+        self.close_engines()
+        packs = self.win.engine.packs
+        self.neural = NeuralVoices(packs / "modelos")
+        self.engines = VoiceEngines(self.neural, self._windows_voice, packs)
+        self.transcriber = None
 
     # ------------------------------------------------------------------ devices
     def input_index(self):
@@ -91,6 +109,10 @@ class VoiceController(QObject):
         def on_error(msg):
             self.win.bridge.call.emit(lambda: self.win.toast(msg))
         self.queue = SpeechQueue(synth, sounddevice_player(self.output_index), on_state, on_error)
+        import sys as _sys
+        if _sys.platform == "win32" and not self.neural.ready:
+            from ..voice.speech import sapi_worker
+            run_bg(sapi_worker().warm, None, lambda e, tb: None)   # first sentence without the PowerShell wait
         return self.queue
 
     def _duck(self, on: bool):
@@ -168,7 +190,7 @@ class VoiceController(QObject):
     def ptt(self, on: bool):
         btn = self.win.chat.composer.mic_btn
         if on:
-            st = stt.status(self.win.engine.home / "modelos", self.win.store.get_setting("voice.model", "small"))
+            st = stt.status(self.win.engine.packs / "modelos", self.win.store.get_setting("voice.model", "small"))
             if not st.ready:
                 btn.setChecked(False)
                 import sys as _sys
@@ -179,10 +201,13 @@ class VoiceController(QObject):
                                         + ", ".join(st.missing) + "\n\n" + how +
                                         "\n\nNada é enviado para APIs pagas: tudo roda no seu computador.")
                 return
-            if not st.model_cached and not self.win.store.get_setting("voice.model_consent", False):
+            if not st.model_cached:
+                # never downloads in silence: ask, show progress, then the button works
                 btn.setChecked(False)
-                QMessageBox.information(self.win, "Voz", "Para transcrever, o modelo escolhido precisa ser baixado uma vez.\n"
-                                        "Autorize em Configurações › Voz local.")
+                if not self.downloading:
+                    from .packs_ui import ensure_stt_model
+                    ensure_stt_model(self.win, self.win.store.get_setting("voice.model", "small"),
+                                     lambda: self.win.toast("Modelo pronto. Clique em Falar e fale."))
                 return
             self.speaker.stop()
             try:
@@ -203,9 +228,15 @@ class VoiceController(QObject):
         self.recorder = None
         btn.setText("Transcrevendo…")
         btn.setEnabled(False)
+        self._stt_t0 = __import__("time").monotonic()
+        if getattr(self, "_stt_timer", None) is None:
+            from PySide6.QtCore import QTimer
+            self._stt_timer = QTimer(self.win, interval=1000)
+            self._stt_timer.timeout.connect(self._stt_tick)
+        self._stt_timer.start()
         model = self.win.store.get_setting("voice.model", "small")
         if self.transcriber is None or self.transcriber.model_name != model:
-            self.transcriber = stt.Transcriber(self.win.engine.home / "modelos", model)
+            self.transcriber = stt.Transcriber(self.win.engine.packs / "modelos", model)
         strength = self.win.store.get_setting("voice.noise", "normal")
 
         def work():
@@ -214,7 +245,14 @@ class VoiceController(QObject):
         run_bg(work, self._transcribed,
                lambda e, tb: self._transcribed("", str(e)))
 
+    def _stt_tick(self):
+        import time as _t
+        secs = int(_t.monotonic() - self._stt_t0)
+        self.win.chat.composer.mic_btn.setText(f"Transcrevendo… {secs} s")
+
     def _transcribed(self, text: str, error: str = ""):
+        if getattr(self, "_stt_timer", None) is not None:
+            self._stt_timer.stop()
         btn = self.win.chat.composer.mic_btn
         btn.setEnabled(True)
         btn.setText("Falar")

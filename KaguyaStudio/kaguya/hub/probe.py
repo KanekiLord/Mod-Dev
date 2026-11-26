@@ -23,13 +23,14 @@ import time
 from . import redact
 from .adapters import _json, _toml
 from .model import Extension
+from .. import procutil
 
 FLAGS_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
 def _run(cmd: list[str], cwd: str | None = None, timeout: float = 60) -> tuple[int, str]:
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        p = procutil.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                            cwd=cwd if cwd and Path(cwd).is_dir() else None, creationflags=FLAGS_WIN,
                            stdin=subprocess.DEVNULL)
         return p.returncode, (p.stdout or "") + (p.stderr or "")

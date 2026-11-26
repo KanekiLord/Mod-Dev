@@ -87,6 +87,9 @@ class RealPlayer(unittest.TestCase):
         root = Path(self.tmp.name) / "Músicas"
         tone(root / "A - Primeira.wav", 0.5, 440)
         tone(root / "B - Segunda.wav", 0.5, 660)
+        if "shuffle" in self._testMethodName:
+            for i in range(10):
+                tone(root / f"C{i} - Extra {i}.wav", 0.5, 300 + 20 * i)
         from kaguya.music.player import MusicPlayer
         self.lib = MusicLibrary(Path(self.tmp.name) / "m.db")
         self.lib.add_folder(root)
@@ -105,6 +108,23 @@ class RealPlayer(unittest.TestCase):
                 return True
             time.sleep(0.02)
         return False
+
+    def test_shuffle_takes_effect_now_and_off_restores_the_order(self):
+        from kaguya.music.commands import parse
+        self.assertEqual(parse("modo aleatório"), ("shuffle", "on"))
+        self.assertEqual(parse("liga o aleatório"), ("shuffle", "on"))
+        self.assertEqual(parse("desliga o aleatório"), ("shuffle", "off"))
+        ids = [t.id for t in self.lib.tracks(limit=500)]
+        self.assertEqual(len(ids), 12)
+        self.p.play_tracks(ids)
+        current = self.p.queue[self.p.index]
+        self.assertEqual(self.p.execute("shuffle", "on"), "Modo aleatório ligado.")
+        self.assertEqual(self.p.queue[self.p.index], current)              # the song playing keeps playing
+        self.assertEqual(sorted(self.p.queue), sorted(ids))                  # nothing lost or duplicated
+        self.assertNotEqual(self.p.queue, ids)                               # …but the rest is shuffled now
+        self.p.set_shuffle(False)
+        self.assertEqual(self.p.queue, ids)                                  # original order back
+        self.assertEqual(self.p.queue[self.p.index], current)
 
     def test_plays_advances_queue_volume_and_ducking(self):
         reply = self.p.execute("play", "")

@@ -10,7 +10,7 @@ from . import theme
 from .theme import AGENT, C
 from .widgets import Dot, Meter, Pill, SpriteView, button, label
 
-STATE_TEXT = {"preparing": "Preparando…", "listening": "Ouvindo — pode falar", "hearing": "Ouvindo você…",
+STATE_TEXT = {"failed": "Não foi possível iniciar — veja o aviso", "preparing": "Preparando…", "listening": "Ouvindo — pode falar", "hearing": "Ouvindo você…",
               "transcribing": "Entendendo…", "thinking": "Pensando…", "speaking": "Falando — fale por cima para interromper",
               "muted": "Microfone desligado", "idle": "Pronto"}
 MASCOT_STATE = {"listening": "listening", "hearing": "listening", "transcribing": "thinking", "thinking": "thinking",
@@ -137,6 +137,8 @@ class LiveWindow(QWidget):
             else:
                 name = self.win.mascots[ev.get("agent", self.agent)].profile["name"]
                 self.ai.setText(f"<b>{name}:</b> {ev['text']}")
+        elif t == "progress":
+            self.ai.setText(ev["text"])
         elif t == "error":
             self.err.setText("⚠ " + ev["message"][:300])
         elif t == "request_end":

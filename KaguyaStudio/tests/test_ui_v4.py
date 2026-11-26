@@ -79,6 +79,9 @@ class UiBase(unittest.TestCase):
         from kaguya.ui.main_window import MainWindow
         w = MainWindow(self.store, self.engine)
         w.resize(1366, 740)
+        # no modal dialog can block a test: packs go to the data folder, downloads are declined by default
+        w.choose_packs_dir = lambda home, need: home
+        w.confirm_download = lambda msg: False
         w.show()
         self.addCleanup(self._flush_deletes)  # runs last: really destroy the window now, not at interpreter exit
         self.addCleanup(w.deleteLater)
@@ -260,11 +263,15 @@ class LiveUi(UiBase):
     def test_live_style_setting_picks_the_window(self):
         from kaguya.ui.live_chibi import LiveChibi
         from unittest import mock
+        from kaguya.voice import stt
         w = self.window()
         w.voice_problems = lambda: []
         bg = mock.patch("kaguya.ui.main_window.run_bg", lambda *a, **k: None)   # no model loading in this test
         bg.start()
         self.addCleanup(bg.stop)
+        cached = mock.patch.object(stt, "model_cached", return_value=True)
+        cached.start()
+        self.addCleanup(cached.stop)
         w.start_live("claude")
         self.assertIsInstance(w.live_window, LiveChibi)                   # default: small chibi
         w.live_window.close()
@@ -1267,3 +1274,64 @@ def tearDownModule():
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     app.processEvents()
     gc.collect()
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class FreezeFixesUi(UiBase):
+    """Report of 26/11: voice and Live stuck, queue blocked, packs always on C:."""
+
+    def test_packs_folder_model_download_and_voice_button(self):
+        from unittest import mock
+        from kaguya.voice import stt
+        w = self.window()
+        other = Path(self.tmp.name) / "D" / "KaguyaStudio Pacotes"
+        asked = []
+        w.choose_packs_dir = lambda home, need: asked.append(need) or other
+        # the voice button without the model: asks (declined here) and never records or downloads in silence
+        w.confirm_download = lambda msg: False
+        with mock.patch.object(stt, "download", side_effect=AssertionError("baixou sem permissão")), \
+                mock.patch.object(stt, "status", return_value=stt.VoiceStatus(True, True, [], False)):
+            w.voice.ptt(True)
+        self.assertIsNone(w.voice.recorder)
+        self.assertEqual(asked, [stt.MODEL_BYTES["small"]])                     # where to save: asked once
+        self.assertEqual(w.engine.packs, other)
+        self.assertEqual(w.voice.neural.dir, other / "modelos" / "kokoro")      # voices follow the folder
+        # accepted: downloaded into the chosen folder, then the action continues
+        msgs, done = [], []
+        w.confirm_download = lambda msg: msgs.append(msg) or True
+
+        def fake_download(folder, model, progress=None, cancel=None):
+            f = folder / f"models--Systran--faster-whisper-{model}" / "snapshots" / "x" / "model.bin"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"0")
+        from kaguya.ui.packs_ui import ensure_stt_model
+        with mock.patch.object(stt, "download", side_effect=fake_download):
+            ensure_stt_model(w, "small", lambda: done.append(True))
+            self.assertTrue(self.pump(lambda: done, 10))
+        self.assertIn(str(other / "modelos"), msgs[0])                          # the message says where
+        self.assertTrue(stt.model_cached(other / "modelos", "small"))
+        w.settings.refresh_packs()
+        self.assertIn(str(other), w.settings.packs_info.text())
+        self.assertIn("baixado", w.settings.packs_info.text())
+
+    def test_queue_interrupt_button_frees_a_running_task(self):
+        import threading
+        from kaguya.messages import Intent
+        pid = self.store.add_project("Projeto", self.project)
+        w = self.window()
+        w.select_project(pid)
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        w.engine._run_single = lambda p, task, cancel: (gate.wait(30), ("executed", "tarde"))[1]   # ignores Cancelar
+        self.engine.store.set_setting("run.cancel_grace_s", 1)
+        tid = self.engine.submit(pid, Intent("execute", "codex", "tarefa travada"))
+        self.assertTrue(self.pump(lambda: self.engine.current_task(pid) == tid, 10))
+        w.go("queue")
+        w.queue.refresh()
+        w.queue.table.selectRow(0)
+        self.assertEqual(w.queue.b_cancel.text(), "Interromper")
+        self.assertTrue(w.queue.b_cancel.isEnabled())
+        w.ask_yes_no = lambda title, text: True
+        w.queue.b_cancel.click()
+        self.assertTrue(self.pump(lambda: self.store.get_task(tid)["status"] == "cancelled", 10))
+        self.assertFalse(self.engine.is_running(pid))

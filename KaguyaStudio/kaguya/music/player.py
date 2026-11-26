@@ -26,6 +26,7 @@ class MusicPlayer(QObject):
         self.out = QAudioOutput(self)
         self.player.setAudioOutput(self.out)
         self.queue: list[int] = []
+        self._ordered: list[int] | None = None   # order before shuffling (restored when shuffle goes off)
         self.index = -1
         self.shuffle = bool(self._get("music.shuffle", False))
         self.repeat = self._get("music.repeat", "off") if self._get("music.repeat", "off") in REPEAT else "off"
@@ -68,6 +69,7 @@ class MusicPlayer(QObject):
         if not ids:
             return False
         self.queue = list(ids)
+        self._ordered = list(ids)
         if self.shuffle:
             first = self.queue.pop(start)
             random.shuffle(self.queue)
@@ -131,7 +133,22 @@ class MusicPlayer(QObject):
         self.changed.emit()
 
     def set_shuffle(self, on: bool):
-        self.shuffle = bool(on)
+        """Takes effect now: the songs after the current one are shuffled (the current one keeps
+        playing); turning it off restores the original order from the current song on."""
+        on = bool(on)
+        if on and not self.shuffle and self.queue:
+            self._ordered = list(self.queue)
+            cur = self.queue[self.index] if 0 <= self.index < len(self.queue) else None
+            rest = [t for i, t in enumerate(self.queue) if i != self.index]
+            random.shuffle(rest)
+            self.queue = ([cur] if cur is not None else []) + rest
+            self.index = 0 if cur is not None else -1
+        elif not on and self.shuffle and getattr(self, "_ordered", None):
+            cur = self.queue[self.index] if 0 <= self.index < len(self.queue) else None
+            self.queue = list(self._ordered)
+            self.index = self.queue.index(cur) if cur in self.queue else -1
+            self._ordered = None
+        self.shuffle = on
         self._set("music.shuffle", self.shuffle)
         self.changed.emit()
 
@@ -205,6 +222,9 @@ class MusicPlayer(QObject):
         if action in ("volume_down", "volume_up"):
             self.set_volume(self.volume + (-15 if action == "volume_down" else 15))
             return f"Volume da música em {self.volume}%."
+        if action == "shuffle":
+            self.set_shuffle(arg != "off")
+            return "Modo aleatório ligado." if self.shuffle else "Modo aleatório desligado."
         if action == "status":
             s = self.status()
             return (f"Tocando {s['title']}" + (f", de {s['artist']}" if s["artist"] else "") + ".") if s["title"] else \

@@ -29,7 +29,7 @@ FOLDERS = {"codex": "kaguya_chibi", "claude": "miwa_chibi"}
 TALK = {"codex": {"fala_neutra": 4, "explicando": 2, "animada": 1, "carinhosa": 1},
         "claude": {"fala_neutra": 4, "explicando": 2, "explicando2": 2, "animada": 1}}
 GREET = {"codex": "carinhosa", "claude": "acenando"}
-STATE_TEXT = {"preparing": "Preparando…", "listening": "Ouvindo", "hearing": "Ouvindo você…",
+STATE_TEXT = {"failed": "Não foi possível iniciar — veja o aviso", "preparing": "Preparando…", "listening": "Ouvindo", "hearing": "Ouvindo você…",
               "transcribing": "Entendendo…", "thinking": "Pensando…", "speaking": "Falando",
               "muted": "Microfone desligado", "idle": "Pronto"}
 SPRITE = 210
@@ -171,6 +171,10 @@ class LiveChibi(QWidget):
                 name = self.win.mascots[ev.get("agent", self.agent)].profile["name"]
                 self.ai.setText(f"{name}: {ev['text']}")
                 self.bubble, self.bubble_user = ev["text"], False
+            self.update()
+        elif t == "progress":
+            self.ai.setText(ev["text"])
+            self.bubble, self.bubble_user = ev["text"], False
             self.update()
         elif t == "error":
             self.err.setText("⚠ " + ev["message"][:300])

@@ -199,10 +199,12 @@ def git_bash_available(env: dict[str, str] | None = None) -> bool:
 
 
 def diagnose(target: str, cwd: str | None = None, override: str | None = None, *,
-             runner: Runner = subprocess.run, env: dict[str, str] | None = None,
-             timeout: float = 45) -> tuple[Diagnosis, Capabilities]:
+             runner: Runner | None = None, env: dict[str, str] | None = None,
+             timeout: float = 25) -> tuple[Diagnosis, Capabilities]:
     if target not in TARGETS:
         raise ValueError("CLI desconhecida")
+    if runner is None:
+        from ..procutil import run as runner       # never hangs on Windows (.cmd → node keeps the pipes open)
     diag = Diagnosis(target=target, checked_at=datetime.now().astimezone().isoformat(timespec="seconds"))
     caps = Capabilities()
     base_env = dict(os.environ if env is None else env)

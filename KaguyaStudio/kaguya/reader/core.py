@@ -10,6 +10,7 @@ import subprocess
 import sys
 import zipfile
 from xml.etree import ElementTree as ET
+from .. import procutil
 
 MAX_FILE = 80 * 1024 * 1024          # bigger files: only archives are listed (central directory)
 MAX_TEXT = 4 * 1024 * 1024           # bytes of a text file actually read
@@ -547,7 +548,7 @@ def read_isolated(path, timeout: float = 25) -> ReadResult:
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get("PYTHONPATH", "")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
-        p = subprocess.run([*reader_command(), str(path)], capture_output=True, timeout=timeout, env=env,
+        p = procutil.run([*reader_command(), str(path)], capture_output=True, timeout=timeout, env=env,
                            creationflags=flags)
         out = p.stdout.decode("utf-8", errors="replace").strip().splitlines()
         if p.returncode != 0 or not out:

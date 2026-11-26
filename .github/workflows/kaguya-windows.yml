@@ -77,6 +77,17 @@ jobs:
           Get-Content "$env:KAGUYA_HOME\logs\voz.txt"
           if ($p.ExitCode -ne 0) { throw "voz indisponível no executável (código $($p.ExitCode))" }
 
+      - name: Modelo de transcrição baixado pelo executável (download real, com tempo limite e verificação)
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $dest = "$env:RUNNER_TEMP\pacotes\modelos"
+          $p = Start-Process -FilePath "dist\KaguyaStudio\KaguyaStudio.exe" -ArgumentList "--baixar-modelo","tiny",$dest -PassThru
+          if (-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; throw "download do modelo travou" }
+          $bin = Get-ChildItem $dest -Recurse -Filter model.bin | Select-Object -First 1
+          if (-not $bin) { throw "model.bin não foi baixado (código $($p.ExitCode))" }
+          Write-Host "ok: $($bin.FullName) ($([math]::Round($bin.Length/1MB)) MB)"
+
       - name: Controle do computador pelo executável (servidor MCP real, entrada e captura do Windows)
         timeout-minutes: 15
         shell: pwsh

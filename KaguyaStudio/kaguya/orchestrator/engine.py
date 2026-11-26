@@ -43,6 +43,7 @@ DEFAULTS = {
     "economy.max_subagents": 2,
     "desktop.window": "Minecraft",   # computer use limited to this window by default ("" = whole screen)
     "desktop.max_actions": 400,
+    "run.cancel_grace_s": 20,        # Cancelar frees the queue after this even if a program does not answer
     "hub.enabled": True,             # Extension Hub: capability list in prompts, real-session evidence, delegation, locks
     "team.max_cycles": 2,
     "team.implementer": "codex",
@@ -112,10 +113,21 @@ class Engine:
     def setting(self, key: str):
         return self.store.get_setting(key, DEFAULTS.get(key))
 
+    @property
+    def packs(self) -> Path:
+        """Folder of heavy downloads (models, voices) — the user's choice, see kaguya/packs.py."""
+        from .. import packs
+        return packs.current(self.store, self.home)
+
     # ------------------------------------------------------------ diagnostics
-    def diagnose(self, target: str, cwd: str | None = None) -> Diagnosis:
+    def diagnose(self, target: str, cwd: str | None = None, cancel: threading.Event | None = None) -> Diagnosis:
         override = self.store.get_setting(f"cli.{target}.path") or None
-        diag, caps = discovery.diagnose(target, cwd, override, env=self.env)
+        runner = None
+        if cancel is not None:
+            import functools
+            from .. import procutil
+            runner = functools.partial(procutil.run, cancel=cancel)   # Cancelar also stops the checks
+        diag, caps = discovery.diagnose(target, cwd, override, env=self.env, runner=runner)
         with self._lock:
             self.diagnoses[target] = diag
             if caps.flags:
@@ -125,10 +137,13 @@ class Engine:
         self.emit("diagnosis", target=target, diagnosis=diag.to_dict())
         return diag
 
-    def ensure_ready(self, target: str, cwd: str | None) -> tuple[str, Capabilities]:
+    def ensure_ready(self, target: str, cwd: str | None, cancel: threading.Event | None = None
+                     ) -> tuple[str, Capabilities]:
         diag = self.diagnoses.get(target)
         if diag is None or not diag.usable:
-            diag = self.diagnose(target, cwd)
+            diag = self.diagnose(target, cwd, cancel)
+        if cancel is not None and cancel.is_set():
+            raise TaskFailed("Interrompido pelo usuário.", "cancelled")
         if not diag.usable:
             fixes = (" Como resolver: " + " ".join(diag.fixes)) if diag.fixes else ""
             raise TaskFailed(f"{target.capitalize()} não está pronto ({diag.label}). " + " ".join(diag.details) + fixes)
@@ -262,13 +277,35 @@ class Engine:
             self.runtimes[pid] = rt
             rt.thread.start()
 
-    def cancel(self, pid: int) -> bool:
+    def cancel(self, pid: int, grace: float | None = None) -> bool:
+        """Stop the running task. If it does not stop by itself within ``grace`` seconds (something outside
+        the Studio not answering), the queue is released anyway: the task is marked cancelled and the next
+        one can start — Cancelar always works."""
         rt = self.runtimes.get(pid)
         if rt and rt.cancel and rt.thread and rt.thread.is_alive():
             desktop_control.request_stop(self.home / "desktop", "tarefa interrompida")
             rt.cancel.set()
+            wait = float(self.setting("run.cancel_grace_s") if grace is None else grace)
+            threading.Thread(target=self._force_release, args=(pid, rt, wait), daemon=True,
+                             name=f"kaguya-cancel-p{pid}").start()
             return True
         return False
+
+    def _force_release(self, pid: int, rt: ProjectRuntime, wait: float) -> None:
+        rt.thread.join(wait)
+        if not rt.thread.is_alive():
+            return
+        with self._lock:
+            if self.runtimes.get(pid) is not rt:
+                return
+            self.runtimes.pop(pid, None)     # the stuck thread is abandoned: it can no longer write anything
+        tid = rt.task_id
+        if tid is not None:
+            self.store.append_event(tid, "warning", f"A tarefa não respondeu ao Cancelar em {int(wait)} s; a fila foi "
+                                    "liberada mesmo assim (o processo travado foi abandonado).")
+            self.store.complete(tid, "cancelled", "Interrompido pelo usuário (liberado à força).")
+            self.emit("task_done", pid=pid, task_id=tid, status="cancelled", summary="Interrompido pelo usuário.")
+        self.emit("worker_idle", pid=pid)
 
     def wait(self, pid: int, timeout: float = 60) -> None:
         rt = self.runtimes.get(pid)
@@ -315,6 +352,8 @@ class Engine:
             if rt.cancel.is_set() and status not in ("approved",):
                 status = "cancelled"
                 summary = summary or "Interrompido pelo usuário."
+            if self.runtimes.get(pid) is not rt:
+                return                       # released by Cancelar while stuck: the task was already closed
             self.store.complete(task["id"], status, summary)
             self.emit("task_done", pid=pid, task_id=task["id"], status=status, summary=summary[-3000:])
             rt.task_id = None
@@ -522,7 +561,9 @@ class Engine:
         block = self.limit_block(agent)
         if block:
             raise TaskFailed(block, "blocked_limit")
-        exe, caps = self.ensure_ready(agent, str(cwd))
+        self.store.set_stage(tid, f"verificando {agent}")
+        exe, caps = self.ensure_ready(agent, str(cwd), cancel)
+        self.store.set_stage(tid, stage)
         prompt = self._with_persona(prompt, agent, pid)
         self.emit("agent_state", pid=pid, task_id=tid, agent=agent, state="running", stage=stage)
         self.store.append_event(tid, "stage", f"{stage}: {agent}", agent)

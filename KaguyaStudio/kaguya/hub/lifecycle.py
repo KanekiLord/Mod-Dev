@@ -20,6 +20,7 @@ import uuid
 
 from . import redact
 from .adapters import PAID, permissions_for
+from .. import procutil
 
 RISKY_LAUNCHERS = {"npx": "baixa e executa um pacote do npm", "uvx": "baixa e executa um pacote do PyPI",
                    "pipx": "baixa e executa um pacote do PyPI", "bunx": "baixa e executa um pacote",
@@ -253,7 +254,7 @@ class Lifecycle:
     def _run(cmd: list[str], stdin: str, cwd: str) -> tuple[int, str]:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         try:
-            p = subprocess.run(cmd, input=stdin or None, capture_output=True, text=True, encoding="utf-8",
+            p = procutil.run(cmd, input=stdin or None, capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=180, cwd=cwd if cwd and Path(cwd).is_dir() else None,
                                creationflags=flags)
             return p.returncode, (p.stdout or "") + (p.stderr or "")

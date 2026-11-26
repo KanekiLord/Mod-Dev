@@ -1,5 +1,40 @@
 # Changelog
 
+## 5.8.1 — 26/11/2026 (correções do relatório de uso real)
+
+### Corrigido — travamentos
+- **Live preso em "Preparando…", escuta por nome que não ligava e fila que não andava.** Causa no Windows: o
+  Studio esperava sem limite um `claude`/`codex` que não respondia. O `subprocess.run(timeout=…)` do Python mata só o
+  `cmd.exe` do `.cmd` e fica esperando o `node` (que segura a saída) para sempre. Agora toda chamada externa passa por
+  `kaguya/procutil.py`: tempo limite real, mata a árvore de processos inteira e respeita o Cancelar.
+- **Tarefa "validada, verdinha" que segurava a fila.** Os testes do projeto (`gradlew test`) deixam o daemon do
+  Gradle aberto segurando a saída, e o Studio esperava o fim dessa saída para sempre. A saída agora vai para arquivo
+  temporário e o Studio espera o processo, não o daemon.
+- **Cancelar sempre libera a fila**: interrompe também a tarefa em execução (botão "Interromper" na Fila) e, se algo
+  externo não responder em 20 s, a tarefa é encerrada mesmo assim e a próxima pode começar. A mensagem "entrou na
+  fila" diz qual tarefa está na frente, o que ela está fazendo e como interromper.
+- **"Transcrevendo…" infinito.** O modelo de transcrição era baixado em silêncio (até 1,5 GB, sem progresso) e,
+  mesmo já baixado, era conferido na internet a cada uso. Agora carrega só do disco; quando falta, o Studio pergunta,
+  mostra o tamanho e o progresso, pode ser cancelado e para com uma explicação se o download travar. O botão mostra
+  há quantos segundos está transcrevendo.
+- O Live mostra o que está esperando ("Verificando o Claude Code… 12 s", "Carregando o reconhecimento de voz…"),
+  verifica as duas IAs em paralelo e, se não der, diz por quê ("Não foi possível iniciar").
+
+### Corrigido — voz lenta (minutos para começar a falar)
+- Sem as vozes neurais baixadas, cada frase abria **dois** PowerShell (um só para listar as vozes). Agora a voz do
+  Windows fica num único processo aberto e gera cada frase em frações de segundo; a escolha do motor não lista mais
+  vozes por frase.
+
+### Corrigido — Kaguya Music
+- **Aleatório**: vale na hora (embaralha o que vem depois da música atual; desligar volta à ordem), fica dourado
+  quando ligado e aceita voz ("modo aleatório", "desliga o aleatório"). No modo "App do Windows" o botão explica que o
+  aleatório é do próprio app.
+
+### Novo — pasta dos pacotes de voz e modelos
+- No primeiro download o Studio pergunta onde guardar: pasta recomendada, **junto da instalação do Studio** (ou no
+  mesmo disco dela) ou outra pasta, mostrando o espaço livre. Configurações › Voz › "Mudar pasta…" move o que já está
+  instalado (nada é baixado de novo).
+
 ## 5.8.0 — 25/11/2026 (Kaguya Extension Hub)
 
 Relatório completo, decisões, evidências reais, limitações e rollback: `docs/EXTENSION_HUB.md`.

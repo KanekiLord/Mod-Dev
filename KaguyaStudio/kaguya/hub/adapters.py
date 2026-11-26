@@ -15,6 +15,7 @@ import subprocess
 
 from . import redact
 from .model import Extension
+from .. import procutil
 
 try:
     import tomllib
@@ -142,7 +143,7 @@ def _run_json(cmd: list[str], timeout: float = 25):
     """Official read-only listing; returns (data, error)."""
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        p = procutil.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                            creationflags=flags, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"{Path(cmd[0]).name}: {exc}"

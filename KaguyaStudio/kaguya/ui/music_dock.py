@@ -367,8 +367,13 @@ class MusicDock(QWidget):
         self.cover.update()
         self.b_play.setIcon(theme.icon("pause" if (local and pl.playing) else "play", C["ink"]))
         self.b_shuffle.blockSignals(True)
-        self.b_shuffle.setChecked(pl.shuffle)
+        self.b_shuffle.setChecked(pl.shuffle and local)
         self.b_shuffle.blockSignals(False)
+        # visible state: gold when on (it used to look the same — gray — on and off)
+        self.b_shuffle.setIcon(theme.icon("shuffle", C["gold"] if (pl.shuffle and local) else C["muted"]))
+        self.b_shuffle.setToolTip("Aleatório: ligado" if pl.shuffle else "Aleatório: desligado" if local else
+                                  "No modo App do Windows, o aleatório é do próprio app (Spotify, Media Player…). "
+                                  "Use \"Kaguya Music\" para o aleatório do Studio.")
         rep = {"off": ("repeat", "Repetir: desligado", C["muted"]), "all": ("repeat", "Repetir: fila", C["gold"]),
                "one": ("repeat-one", "Repetir: esta música", C["gold"])}[pl.repeat]
         self.b_repeat.setIcon(theme.icon(rep[0], rep[2]))

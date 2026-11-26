@@ -142,32 +142,47 @@ class WakeController:
             win.store.set_setting("wake.consent", True)
         self.starting = True
         win.sync_wake_ui()
+        from .packs_ui import ensure_stt_model
+        model = win.store.get_setting("voice.model", "small")
+        quick = win.store.get_setting("wake.model", "base")
+
+        def cancelled():
+            self.starting = False
+            win.sync_wake_ui()
+        # both models are downloaded with your OK and a progress bar first (never in silence)
+        ensure_stt_model(win, model, lambda: ensure_stt_model(win, quick, self._begin, cancelled)
+                         if quick and quick != model else self._begin(), cancelled)
+        return True
+
+    def can_autostart(self) -> bool:
+        """At launch the listener only comes back when nothing needs downloading (no dialog at startup)."""
+        from ..voice import stt
+        win = self.win
+        folder = win.engine.packs / "modelos"
+        models = {win.store.get_setting("voice.model", "small"), win.store.get_setting("wake.model", "base")} - {""}
+        return all(stt.model_cached(folder, m) for m in models)
+
+    def _begin(self):
+        win = self.win
         cwd = win.store.project(win.pid)["directory"] if win.pid is not None else str(win.engine.home)
         from ..voice import stt
+        win.toast("Ligando a escuta por nome…")
 
         def prepare():
-            exes = {}
-            for a in ("codex", "claude"):
-                try:
-                    exes[a] = win.engine.ensure_ready(a, cwd)
-                except Exception as exc:
-                    exes[a] = exc
+            exes = win.prepare_voice_session("codex", cwd)
             model = win.store.get_setting("voice.model", "small")
-            if win.voice.transcriber is None or win.voice.transcriber.model_name != model:
-                win.voice.transcriber = stt.Transcriber(win.engine.home / "modelos", model)
-            win.voice.transcriber.load()
             quick_name = win.store.get_setting("wake.model", "base")
             quick = None
             if quick_name and quick_name != model:
-                quick = stt.Transcriber(win.engine.home / "modelos", quick_name)
+                quick = stt.Transcriber(win.engine.packs / "modelos", quick_name)
                 quick.load()
             return exes, quick
         run_bg(prepare, lambda res: self._ready(res[0], res[1], cwd), self._failed)
-        return True
 
     def _failed(self, exc, tb=None):
         self.starting = False
         self.win.toast(f"Não foi possível ligar a escuta: {exc}")
+        self.win.store.set_setting("wake.enabled", False)
         self.win.sync_wake_ui()
 
     def _ready(self, exes, quick, cwd):

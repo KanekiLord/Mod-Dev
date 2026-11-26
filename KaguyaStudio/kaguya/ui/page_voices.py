@@ -281,15 +281,18 @@ class VoicesPage(QWidget):
     # ------------------------------------------------------------- heavy engine install (always confirmed)
     def install_qwen(self, confirm=None):
         from ..voice.heavy import SPECS, engine_dir
+        from .packs_ui import ask_packs_dir
         spec = SPECS["qwen3"]
-        dest = engine_dir(self.win.engine.home, "qwen3")
+        if confirm is None and ask_packs_dir(self.win, 5 * 1024 ** 3) is None:   # where to install (asked once)
+            return False
+        dest = engine_dir(self.win.engine.packs, "qwen3")
         msg = (f"Instalar {spec.name}?\n\n"
                f"Modelo: {spec.model} (Hugging Face, Qwen/Alibaba)\n"
                f"Licença: {spec.license}\n"
                f"Tamanho: {spec.approx}\n"
                f"Origem: uv {__import__('kaguya.voice.heavy', fromlist=['x']).UV_VERSION} (GitHub astral-sh, checksum "
                f"conferido), Python 3.12, PyTorch para CPU (download.pytorch.org), qwen-tts 0.1.1 (PyPI)\n"
-               f"Destino: {dest}\n\n"
+               f"Destino: {dest}\n(para mudar o disco/pasta: Configurações › Voz › Mudar pasta)\n\n"
                f"{spec.notes}\n\nNada é enviado a terceiros; nenhuma chave ou conta é usada. "
                "Pode cancelar a qualquer momento, e Remover apaga tudo.")
         ok = confirm(msg) if confirm else QMessageBox.question(self, "Instalar voz Qwen3-TTS", msg) == QMessageBox.Yes
@@ -299,7 +302,7 @@ class VoicesPage(QWidget):
         self.install_log.clear()
         self.install_log.show()
         log = lambda line: _deliver(lambda: self.install_log.append(line))
-        self._installer = Installer(self.win.engine.home, "qwen3", log=log)
+        self._installer = Installer(self.win.engine.packs, "qwen3", log=log)
         self.refresh()
 
         def done(_info):
@@ -327,7 +330,7 @@ class VoicesPage(QWidget):
         if not ok:
             return False
         self.win.voice.engines.close()
-        Installer(self.win.engine.home, "qwen3").uninstall()
+        Installer(self.win.engine.packs, "qwen3").uninstall()
         for a in ("codex", "claude"):   # profiles that pointed to it fall back to automatic
             p = load_profile(self.win.store, a)
             if p.engine == "qwen3":

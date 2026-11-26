@@ -158,7 +158,9 @@ class MainWindow(QMainWindow):
         self._later(3500, lambda: self.refresh_codex_limits())
         self._later(2500, lambda: run_bg(self.refresh_github_status))
         if self.store.get_setting("wake.enabled", False) and self.store.get_setting("wake.consent", False):
-            self._later(4000, lambda: self.set_wake(True))  # the user left the name listener on
+            # the user left the name listener on (comes back only if no download is needed: no dialog at launch)
+            self._later(4000, lambda: self.set_wake(True) if self.wake.can_autostart() else
+                        self.toast("Escuta por nome desligada: falta baixar o modelo de transcrição (ligue de novo)."))
         # Extension Hub: watch the clients' configs (debounced, read-only) and tell when something new appears
         self._hub_timer = QTimer(self, interval=6000)
         self._hub_timer.timeout.connect(self._hub_poll)
@@ -856,7 +858,15 @@ class MainWindow(QMainWindow):
         elif intent.kind == "idea":
             self.chat.view.message("studio", f"Ideia #{tid} guardada na fila e como rascunho para o Segundo Cérebro.")
         elif self.engine.is_running(self.pid) and self.engine.current_task(self.pid) != tid:
-            self.chat.view.message("studio", f"Tarefa #{tid} entrou na fila e começa quando a atual terminar.")
+            cur = self.engine.current_task(self.pid)
+            stage = ""
+            try:
+                stage = (self.store.get_task(cur).get("stage") or "") if cur else ""
+            except ValueError:
+                pass
+            self.chat.view.message("studio", f"Tarefa #{tid} entrou na fila: começa quando a #{cur} terminar"
+                                   + (f" (agora: {stage})" if stage else "") + ". Para não esperar, "
+                                   "interrompa a atual no botão Parar ou em Fila › Interromper.")
         if not quick:
             self.chat.composer.edit.clear()
         self.refresh_status()
@@ -1065,6 +1075,17 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Modo Live", "Para usar o Live:\n\n• " + "\n• ".join(problems))
             self.go("settings")
             return
+        if self.voice.downloading:
+            self.toast("Aguarde o download do modelo de transcrição terminar.")
+            return
+        from .packs_ui import ensure_stt_model
+        # the model is downloaded with your OK and a progress bar first — never in silence inside "Preparando…"
+        ensure_stt_model(self, self.store.get_setting("voice.model", "small"), lambda: self._open_live(agent))
+
+    def _open_live(self, agent: str):
+        from ..voice import stt
+        if self.live_window is not None:
+            return
         if not self.voice.neural.ready:
             self.toast("Dica: baixe as vozes neurais em Configurações › Voz para uma fala bem mais natural.")
         if self.wake.running:  # one microphone user at a time: the name listener resumes after Live
@@ -1082,20 +1103,51 @@ class MainWindow(QMainWindow):
         cwd = self.store.project(self.pid)["directory"] if self.pid is not None else str(self.engine.home)
         win = self
 
+        def progress(text):
+            win.bridge.call.emit(lambda: win.live_window and win.live_window.on_event({"type": "progress", "text": text}))
+
         def prepare():
-            exes = {}
-            for a in ("codex", "claude"):
-                try:
-                    exes[a] = win.engine.ensure_ready(a, cwd)
-                except Exception as exc:
-                    exes[a] = exc
-            model = win.store.get_setting("voice.model", "small")
-            if win.voice.transcriber is None or win.voice.transcriber.model_name != model:
-                win.voice.transcriber = stt.Transcriber(win.engine.home / "modelos", model)
-            win.voice.transcriber.load()
-            return exes
-        run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd),
-               lambda exc, tb: (self.live_window and self.live_window.on_event({"type": "error", "message": str(exc)})))
+            return win.prepare_voice_session(agent, cwd, progress)
+
+        def failed(exc, _tb):
+            if self.live_window:
+                self.live_window.on_event({"type": "error", "message": str(exc)})
+                self.live_window.on_event({"type": "state", "state": "failed"})
+        run_bg(prepare, lambda exes: self._live_ready(exes, agent, cwd), failed)
+
+    def prepare_voice_session(self, agent: str, cwd: str, progress=lambda text: None) -> dict:
+        """Check both assistants in parallel and load speech recognition, saying what it is waiting for.
+        Every step has a time limit (see kaguya/procutil.py): nothing here can wait forever."""
+        import threading
+        import time as _t
+        from ..voice import stt
+        exes, names = {}, {"codex": "Codex (Kaguya)", "claude": "Claude Code (Miwa)"}
+
+        def check(a):
+            try:
+                exes[a] = self.engine.ensure_ready(a, cwd)
+            except Exception as exc:
+                exes[a] = exc
+        threads = {a: threading.Thread(target=check, args=(a,), daemon=True) for a in ("codex", "claude")}
+        for t in threads.values():
+            t.start()
+        t0 = _t.monotonic()
+        while threads[agent].is_alive():
+            secs = int(_t.monotonic() - t0)
+            progress(f"Verificando o {names[agent]}… {secs} s" + (" (está demorando: antivírus ou primeira execução)"
+                                                                  if secs >= 15 else ""))
+            threads[agent].join(1)
+        other = "claude" if agent == "codex" else "codex"
+        if isinstance(exes.get(agent), Exception):
+            threads[other].join(60)        # the other one may still work: wait a little for it
+        model = self.store.get_setting("voice.model", "small")
+        if self.voice.transcriber is None or self.voice.transcriber.model_name != model:
+            self.voice.transcriber = stt.Transcriber(self.engine.packs / "modelos", model)
+        if not self.voice.transcriber.loaded:
+            progress("Carregando o reconhecimento de voz…")
+            self.voice.transcriber.load()
+        progress("")
+        return exes
 
     def apply_persona_names(self):
         """Character names from the personality editor (persona_id) — CLI providers are untouched."""
@@ -1167,11 +1219,9 @@ class MainWindow(QMainWindow):
     def voice_problems(self) -> list[str]:
         from ..voice import devices as dv, stt
         problems = []
-        st = stt.status(self.engine.home / "modelos", self.store.get_setting("voice.model", "small"))
+        st = stt.status(self.engine.packs / "modelos", self.store.get_setting("voice.model", "small"))
         if not st.ready:
             problems.append("A transcrição local não está disponível nesta cópia (faltam: " + ", ".join(st.missing) + ").")
-        elif not st.model_cached and not self.store.get_setting("voice.model_consent", False):
-            problems.append("Autorize o download do modelo de transcrição em Configurações › Voz local.")
         if not dv.available():
             problems.append("O acesso a microfone/fone não está disponível nesta cópia.")
         return problems

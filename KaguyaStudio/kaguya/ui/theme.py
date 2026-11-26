@@ -144,6 +144,7 @@ QPushButton[kind="danger"] {{ background: #3A1824; border-color: #7A3044; color:
 QPushButton[kind="danger"]:hover {{ background: #4A1E2E; border-color: {c['danger']}; }}
 QPushButton[kind="ghost"] {{ background: transparent; border: 1px solid transparent; color: {c['muted']}; }}
 QPushButton[kind="ghost"]:hover {{ background: {c['surface2']}; color: {c['text']}; border-color: {c['border']}; }}
+QPushButton[kind="ghost"]:checked {{ background: {c['gold_bg']}; border-color: #6B5330; color: {c['gold']}; }}
 QPushButton[kind="chip"] {{ background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 14px; padding: 5px 12px;
               font-weight: 500; color: {c['muted']}; }}
 QPushButton[kind="chip"]:checked {{ background: {c['violet_bg']}; border-color: {c['violet']}; color: {c['text']}; }}

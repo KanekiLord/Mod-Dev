@@ -134,7 +134,8 @@ class QueuePage(QWidget):
         t = self.selected()
         self.b_run.setEnabled(bool(t and t["status"] == "parked"))
         self.b_retry.setEnabled(bool(t and t["status"] in ("interrupted", "error", "cancelled", "blocked_limit")))
-        self.b_cancel.setEnabled(bool(t and t["status"] in ("queued", "parked")))
+        self.b_cancel.setEnabled(bool(t and t["status"] in ("queued", "parked", "running")))
+        self.b_cancel.setText("Interromper" if t and t["status"] == "running" else "Cancelar")
         self.b_details.setEnabled(bool(t))
         self.b_undo.setEnabled(bool(t and t.get("checkpoint") and t["status"] != "running"))
         self._show_integration(t)
@@ -206,9 +207,21 @@ class QueuePage(QWidget):
 
     def cancel(self):
         t = self.selected()
-        if t:
+        if not t:
+            return
+        if t["status"] == "running":
+            ask = getattr(self.win, "ask_yes_no", None)
+            msg = (f"Interromper a tarefa #{t['id']} em execução? Ela fica como 'cancelada' e a fila é liberada "
+                   "(se algum programa não responder, o Studio libera a fila em até 20 s).")
+            if ask is not None and not ask("Interromper tarefa", msg):
+                return
+            if not self.win.engine.cancel(t["project_id"]):
+                # nothing running in this session (left over from a crash): close it so the queue moves
+                self.win.store.complete(t["id"], "cancelled", "Interrompido pelo usuário.")
+            self.win.toast(f"Interrompendo a tarefa #{t['id']}…")
+        else:
             self.win.store.cancel_queued(t["id"])
-            self.refresh()
+        self.refresh()
 
     def details(self, *_):
         t = self.selected()
