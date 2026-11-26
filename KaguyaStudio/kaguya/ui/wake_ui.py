@@ -87,7 +87,7 @@ class SpeechBubble(QWidget):
 
 def first_sentences(text: str, limit: int = 220) -> str:
     """Short spoken summary of a task result (skips the report headings)."""
-    body = re.split(r"\n\s*(?:EVID[ÊE]NCIAS|PEND[ÊE]NCIAS|APRENDIZADOS|ERROS|REFER[ÊE]NCIAS|VERIFICA)", text or "", 1)[0]
+    body = re.split(r"\n\s*(?:EVID[ÊE]NCIAS|PEND[ÊE]NCIAS|APRENDIZADOS|ERROS|REFER[ÊE]NCIAS|VERIFICA)", text or "", maxsplit=1)[0]
     body = re.sub(r"^\s*TRABALHO:\s*", "", body.strip())
     body = re.sub(r"[`*_#>]", "", body)
     body = " ".join(body.split())
@@ -103,6 +103,7 @@ class WakeController:
         self.win = win
         self.session = None
         self.starting = False
+        self._gen = 0              # bumped on every start/stop: a late "ready" from an older start is ignored
         self.bubble = SpeechBubble()
         self.voice_tasks: dict[int, str] = {}
         self.current = "codex"
@@ -141,6 +142,8 @@ class WakeController:
                 return False
             win.store.set_setting("wake.consent", True)
         self.starting = True
+        self._gen += 1
+        gen = self._gen
         win.sync_wake_ui()
         from .packs_ui import ensure_stt_model
         model = win.store.get_setting("voice.model", "small")
@@ -150,8 +153,9 @@ class WakeController:
             self.starting = False
             win.sync_wake_ui()
         # both models are downloaded with your OK and a progress bar first (never in silence)
-        ensure_stt_model(win, model, lambda: ensure_stt_model(win, quick, self._begin, cancelled)
-                         if quick and quick != model else self._begin(), cancelled)
+        begin = lambda: self._begin(gen)   # noqa: E731
+        ensure_stt_model(win, model, lambda: ensure_stt_model(win, quick, begin, cancelled)
+                         if quick and quick != model else begin(), cancelled)
         return True
 
     def can_autostart(self) -> bool:
@@ -162,8 +166,10 @@ class WakeController:
         models = {win.store.get_setting("voice.model", "small"), win.store.get_setting("wake.model", "base")} - {""}
         return all(stt.model_cached(folder, m) for m in models)
 
-    def _begin(self):
+    def _begin(self, gen: int | None = None):
         win = self.win
+        if gen is not None and gen != self._gen:
+            return                          # switched off (or restarted) while the models were downloading
         cwd = win.store.project(win.pid)["directory"] if win.pid is not None else str(win.engine.home)
         from ..voice import stt
         win.toast("Ligando a escuta por nome…")
@@ -177,7 +183,8 @@ class WakeController:
                 quick = stt.Transcriber(win.engine.packs / "modelos", quick_name)
                 quick.load()
             return exes, quick
-        run_bg(prepare, lambda res: self._ready(res[0], res[1], cwd), self._failed)
+        gen = self._gen
+        run_bg(prepare, lambda res: self._ready(res[0], res[1], cwd, gen), self._failed)
 
     def _failed(self, exc, tb=None):
         self.starting = False
@@ -185,9 +192,14 @@ class WakeController:
         self.win.store.set_setting("wake.enabled", False)
         self.win.sync_wake_ui()
 
-    def _ready(self, exes, quick, cwd):
+    def _ready(self, exes, quick, cwd, gen: int | None = None):
         from ..live.session import LiveSession, NAMES_PROMPT
         win = self.win
+        if (gen is not None and gen != self._gen) or not self.starting or win.live_window is not None:
+            # switched off while it was starting, or the Live took the microphone: never open it behind your back
+            self.starting = False
+            win.sync_wake_ui()
+            return
         self.starting = False
         if all(isinstance(v, Exception) for v in exes.values()):
             self._failed(exes.get("codex"))
@@ -216,7 +228,11 @@ class WakeController:
 
     def stop(self, remember: bool = False):
         s, self.session = self.session, None
+        was_starting = self.starting
         self.starting = False
+        self._gen += 1                       # cancels a start still in progress
+        if was_starting and not remember:
+            self.win.store.set_setting("wake.enabled", False)
         if s is not None:
             run_bg(s.stop)
             if not remember:

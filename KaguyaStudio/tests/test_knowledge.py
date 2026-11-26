@@ -46,6 +46,27 @@ class Base(unittest.TestCase):
 
 
 class Proposals(Base):
+    def test_note_saved_with_bom_can_be_updated_and_keeps_its_format(self):
+        self.note.write_bytes(b"\xef\xbb\xbf" + NOTE.encode("utf-8"))     # as some Windows editors save
+        self.idx.update()
+        p = self.ob.stage("pesquisa", "Registro de entidades", "Em 1.20.1 o RegisterEvent também funciona.",
+                          source_url=URL, version="Forge 1.20.1", found_by="Kaguya (Codex)")
+        self.assertFalse(self.ob.drafts()[0]["stale"])
+        done = self.ob.approve([p.name])
+        self.assertEqual(len(done), 1, self.ob.last_error)                   # used to say "mudou" forever
+        raw = self.note.read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))                  # BOM kept
+        self.assertIn("RegisterEvent também funciona", raw.decode("utf-8-sig"))
+
+    def test_invalid_bytes_are_never_rewritten_and_the_reason_is_shown(self):
+        p = self.ob.stage("pesquisa", "Registro de entidades", "Outra informação.", source_url=URL,
+                          version="Forge 1.20.1", found_by="Kaguya (Codex)")
+        self.note.write_bytes(NOTE.encode("utf-8") + b"\xff\xfe lixo")      # changed + not UTF-8
+        before = self.note.read_bytes()
+        self.assertEqual(self.ob.approve([p.name]), [])
+        self.assertIn("mudou", self.ob.last_error)
+        self.assertEqual(self.note.read_bytes(), before)
+
     def test_new_note_has_the_spec_properties(self):
         p = self.ob.stage("aprendizado", "Clones usam EntityJoinLevelEvent", "Para spawnar clones, escute "
                           "EntityJoinLevelEvent e cancele duplicatas.", project="NarutoCD", source_url="https://x.org/a",

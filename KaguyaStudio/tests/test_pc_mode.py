@@ -160,3 +160,130 @@ class PcEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Security(unittest.TestCase):
+    """Second review (26/11/2026): the assistant must not be able to answer its own confirmation, open things that
+    run code without asking, nor type into another window."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name) / "desktop"
+        self.log = Path(self.tmp.name) / "fake.jsonl"
+
+    def _studio(self, answer: str):
+        """A stand-in for the Studio's confirmation bridge: checks the token, answers on the same connection."""
+        import socket
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        seen = []
+
+        def serve():
+            conn, _ = srv.accept()
+            with conn:
+                data = b""
+                while b"\n" not in data:
+                    data += conn.recv(4096)
+                req = json.loads(data.decode())
+                seen.append(req)
+                ok = req["token"] == "segredo-da-tarefa"
+                conn.sendall((json.dumps({"ok": ok, "text": answer if ok else "encerrado"}) + "\n").encode())
+            srv.close()
+        threading.Thread(target=serve, daemon=True).start()
+        return srv.getsockname()[1], seen
+
+    def test_answer_only_comes_from_the_studio_connection(self):
+        port, seen = self._studio("sim")
+        env = {"KAGUYA_CONFIRM_PORT": str(port), "KAGUYA_CONFIRM_TOKEN": "segredo-da-tarefa",
+               "KAGUYA_DESKTOP_DIR": str(self.base)}
+        with mock.patch.dict(os.environ, env):
+            self.assertTrue(assistant.ask_user(self.base, "Enviar para Mamãe: oi", timeout=5))
+        self.assertEqual((seen[0]["tool"], seen[0]["args"]["action"]), ("confirmar", "Enviar para Mamãe: oi"))
+        port, _ = self._studio("nao")
+        with mock.patch.dict(os.environ, {**env, "KAGUYA_CONFIRM_PORT": str(port)}):
+            self.assertFalse(assistant.ask_user(self.base, "Apagar Downloads", timeout=5))
+
+    def test_assistant_writing_sim_to_a_file_gets_nothing(self):
+        stop = threading.Event()
+
+        def attacker():          # what an assistant with write access to the user's folder could do
+            while not stop.is_set():
+                folder = control.control_dir(self.base) / assistant.REQUESTS
+                for req in folder.glob("*.json") if folder.exists() else []:
+                    (folder / (req.stem + ".resposta")).write_text("sim", encoding="utf-8")
+                time.sleep(0.01)
+        t = threading.Thread(target=attacker, daemon=True)
+        t.start()
+        self.addCleanup(stop.set)
+        with mock.patch.dict(os.environ, {"KAGUYA_DESKTOP_DIR": str(self.base)}):
+            os.environ.pop("KAGUYA_DESKTOP_BACKEND", None)
+            os.environ.pop("KAGUYA_CONFIRM_PORT", None)
+            self.assertFalse(assistant.ask_user(self.base, "Enviar mensagem", timeout=1))   # no channel → no
+
+    def test_open_path_asks_for_anything_that_can_run_code(self):
+        env = {"KAGUYA_DESKTOP_BACKEND": "fake", "KAGUYA_DESKTOP_DIR": str(self.base),
+               "KAGUYA_DESKTOP_FAKE_LOG": str(self.log)}
+        asked = []
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(assistant, "ask_user", side_effect=lambda b, what, *a: asked.append(what) or False):
+            folder = Path(self.tmp.name)
+            for name in ("pagina.hta", "painel.cpl", "atalho.url", "script.wsf", "sem_extensao"):
+                (folder / name).write_text("x")
+                with self.assertRaises(ValueError):
+                    assistant.open_target(str(folder / name))
+            self.assertEqual(len(asked), 5)
+            for uri in ("ms-msdt:/id PCWDiagnostic", "search-ms:query=x", "ms-appinstaller:?source=http://x",
+                        "file:///C:/Windows/System32/calc.exe"):
+                with self.assertRaises(ValueError):
+                    assistant.open_target(uri)
+            (folder / "relatorio.pdf").write_text("x")
+            assistant.open_target(str(folder / "relatorio.pdf"))            # documents open without asking
+            assistant.open_target("https://youtube.com")
+            assistant.open_target("ms-settings:sound")
+            self.assertEqual(len(asked), 5)
+
+    def test_keys_are_refused_when_windows_keeps_another_window_in_front(self):
+        class Stubborn(FakeBackend):
+            def focus(self, w):
+                return False                                  # Windows focus lock: nothing changes
+        env = {"KAGUYA_DESKTOP_BACKEND": "fake", "KAGUYA_DESKTOP_DIR": str(self.base),
+               "KAGUYA_DESKTOP_FAKE_LOG": str(self.log)}
+        with mock.patch.dict(os.environ, env):
+            d = Desktop(Stubborn(str(self.log)), self.base, window="Minecraft")
+            with self.assertRaises(Refused):
+                d.call("type_text", {"text": "oi"})
+        acts = [json.loads(l)["action"] for l in self.log.read_text(encoding="utf-8").splitlines()] \
+            if self.log.exists() else []
+        self.assertNotIn("type", acts)
+
+    def test_codex_resume_keeps_this_tasks_sandbox(self):
+        from kaguya.cli.commands import RunOptions, build_command
+        from kaguya.cli.discovery import Capabilities
+        cmd = build_command("codex", "codex", Capabilities(), RunOptions(write=False, resume="thread-antiga",
+                                                                         in_git=True))
+        self.assertIn("sandbox_mode='read-only'", cmd)
+        self.assertLess(cmd.index("sandbox_mode='read-only'"), cmd.index("exec"))      # global option
+
+
+class Alarms(unittest.TestCase):
+    def test_two_processes_never_lose_a_reminder(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d) / "desktop"
+            root = str(Path(__file__).resolve().parents[1])
+            code = ("import sys; sys.path.insert(0, sys.argv[1]); from pathlib import Path; "
+                    "from kaguya.desktop import assistant\n"
+                    "for i in range(40): assistant.add_alarm(Path(sys.argv[2]), when='2099-01-01 10:00', text=f'p{i}')")
+            env = dict(os.environ, KAGUYA_DESKTOP_DIR=str(base))
+            proc = subprocess.Popen([sys.executable, "-c", code, root, str(base)], env=env)
+            with mock.patch.dict(os.environ, {"KAGUYA_DESKTOP_DIR": str(base)}):
+                for i in range(40):                       # the Studio side, at the same time
+                    assistant.add_alarm(base, minutes=0.0001, text=f"s{i}")
+                    assistant.due_alarms(base)
+                proc.wait(60)
+                time.sleep(0.05)
+                assistant.due_alarms(base)
+                left = {a["text"] for a in assistant.load_alarms(base)}
+            self.assertEqual(left, {f"p{i}" for i in range(40)})     # every reminder of the other process kept

@@ -156,6 +156,40 @@ class EngineTests(unittest.TestCase):
             self.assertNotEqual(Path(info["path"]).resolve(), self.project.resolve())
         self.assertFalse((self.project / "feito_pelo_codex.txt").exists())  # main tree untouched
 
+    def test_parallel_task_can_be_rerun_and_leaves_no_worktree_folders(self):
+        from kaguya.orchestrator import worktree
+        eng = self.engine(FAKE_CODEX_WRITE="1")
+        text = "PARALELO:\n@codex: criar classe Missao\n@claude: documentar API de missões"
+        task = self.run_task(eng, text)
+        self.store.complete(task["id"], "error", "falhou numa etapa")      # as after a failure…
+        self.assertTrue(self.store.requeue(task["id"]))                    # …the user clicks Reenfileirar
+        eng.start_worker(self.pid)
+        eng.wait(self.pid, 60)
+        again = self.store.get_task(task["id"])
+        evs = [json.loads(e["message"]) for e in self.store.events(task["id"]) if e["kind"] == "worktree"]
+        self.assertEqual(len(evs), 4)                                    # two runs × two workers
+        self.assertTrue(all(i.get("ok") for i in evs), [i.get("error") for i in evs])   # used to fail: branch exists
+        self.assertEqual(len({i["branch"] for i in evs}), 4)
+        base = worktree.worktree_base(self.project)
+        left = [p for p in base.iterdir()] if base.exists() else []
+        self.assertEqual(left, [])                                       # folders removed after each run
+        self.assertNotEqual(again["status"], "error", again["result"])
+
+    def test_a_task_queued_while_the_worker_is_finishing_gets_a_worker(self):
+        import threading as th
+        eng = self.engine()
+        from kaguya.orchestrator.engine import ProjectRuntime
+        gate = th.Event()
+        rt = ProjectRuntime(cancel=th.Event(), thread=th.Thread(target=gate.wait, daemon=True))
+        rt.thread.start()
+        rt.finished = True                          # the loop already decided to stop; the thread is returning
+        eng.runtimes[self.pid] = rt
+        self.assertFalse(eng.is_running(self.pid))
+        tid = eng.submit(self.pid, classify_message("@codex: explique", "equipe"))
+        eng.wait(self.pid, 60)
+        gate.set()
+        self.assertEqual(self.store.get_task(tid)["status"], "executed")  # not stranded in the queue
+
     def test_stale_session_falls_back_to_new_conversation(self):
         self.store.set_session(self.pid, "claude", "3f1c2b6e-1111-4222-8333-944455556666")
         task = self.run_task(self.engine(FAKE_CLAUDE_STALE="1"), "@claude: continue")

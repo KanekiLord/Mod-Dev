@@ -1,5 +1,27 @@
 # Changelog
 
+## 5.9.2 — 26/11/2026 (verificação completa do código, parte 2: código mais antigo)
+
+### Segurança
+- **A IA podia responder "sim" à própria confirmação** no modo "Meu computador": a resposta era um arquivo numa
+  pasta que ela pode escrever. Agora a pergunta e a resposta passam por uma conexão local que só o Studio responde,
+  com um código por tarefa que morre quando a tarefa termina ou quando você aperta Parar (perguntas pendentes viram
+  "não"). Sem esse canal, a resposta é sempre "não".
+- **Abrir arquivo/link podia executar programas sem perguntar** (.hta, .cpl, .url, `ms-msdt:`, `search-ms:`…):
+  só documentos, mídia e links comuns abrem direto; o resto pede confirmação, e endereços perigosos são recusados.
+- **Codex continuando uma conversa herdava as permissões da tarefa anterior** (uma pergunta só de leitura podia
+  continuar uma sessão com permissão de escrita): o sandbox desta tarefa vale sempre.
+- **Teclado na janela errada**: se o Windows não deixar trazer a janela permitida para a frente, nada é digitado.
+
+### Robustez
+- Tarefa enviada no instante em que a fila terminava ficava parada sem ninguém para executá-la.
+- Tarefa em paralelo que falhou nunca podia ser reexecutada ("branch já existe"); pastas de trabalho se acumulavam.
+- Live: depois de um "não respondeu a tempo", a resposta atrasada respondia a pergunta seguinte.
+- Lembretes e timers podiam sumir quando a IA criava um no mesmo instante em que outro tocava.
+- Segundo Cérebro: notas salvas com BOM (alguns editores do Windows) nunca podiam receber atualização; falhas na
+  aprovação agora sempre dizem o motivo; nota com caracteres inválidos nunca é reescrita.
+- Escuta por nome: desligar enquanto ainda ligava abria o microfone mesmo assim.
+
 ## 5.9.1 — 26/11/2026 (verificação completa do código, parte 1)
 
 ### Corrigido — erro grave que deixava telas "travadas"

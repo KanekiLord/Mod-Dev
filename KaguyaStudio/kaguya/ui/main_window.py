@@ -583,6 +583,7 @@ class MainWindow(QMainWindow):
     def stop_desktop(self, reason: str):
         from ..desktop import control
         control.request_stop(self.engine.home / "desktop", reason)
+        self.assistant.revoke_all()          # pending questions → "no"; no task can ask again
         if self.pid is not None:
             self.engine.cancel(self.pid)
         self.toast("Controle do computador parado.")
@@ -1274,7 +1275,7 @@ class MainWindow(QMainWindow):
     def set_wake(self, on: bool):
         if on and not self.wake.running:
             self.wake.start()
-        elif not on and self.wake.running:
+        elif not on and (self.wake.running or self.wake.starting):   # also cancels a start in progress
             self.wake.stop()
         self.sync_wake_ui()
 

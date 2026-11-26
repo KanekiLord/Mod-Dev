@@ -22,6 +22,13 @@ from . import control
 ALARMS = "lembretes.json"
 REQUESTS = "pedidos"
 EXECUTABLE = {".exe", ".bat", ".cmd", ".ps1", ".vbs", ".msi", ".scr", ".com", ".js", ".jar", ".reg", ".lnk"}
+# opened without asking: documents, media, archives and the calendar files the Studio creates. Anything else
+# (.hta, .cpl, .msc, .wsf, .url, .appref-ms, .html…) may run code → asks first, like a program.
+SAFE_FILES = {".txt", ".md", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico", ".mp3", ".wav",
+              ".ogg", ".flac", ".m4a", ".aac", ".mp4", ".mkv", ".webm", ".avi", ".mov", ".docx", ".xlsx", ".pptx",
+              ".odt", ".ods", ".odp", ".csv", ".json", ".log", ".ics", ".zip", ".7z", ".rar", ".blend", ".bbmodel",
+              ".obj", ".fbx", ".glb", ".gltf", ".psd", ".kra", ".aseprite"}
+SAFE_SCHEMES = ("https", "http", "mailto", "whatsapp", "ms-settings")   # ms-msdt:, search-ms:… are refused
 BLOCKED_APPS = ("regedit", "editor do registro", "gpedit", "diskpart", "bios", "format")
 
 
@@ -40,13 +47,21 @@ def open_target(target: str) -> str:
     target = target.strip().strip('"')
     if not target:
         raise ValueError("Informe o arquivo, pasta ou site.")
-    is_url = bool(re.match(r"^(https?|mailto|whatsapp|ms-[a-z-]+):", target, re.I))
-    if not is_url:
+    m = re.match(r"^([a-z][a-z0-9+.-]{1,30}):(?!\\)", target, re.I)
+    is_url = bool(m) and not re.match(r"^[a-z]:[\\/]", target, re.I)       # "C:\..." is a path, not a scheme
+    if is_url:
+        if m.group(1).lower() not in SAFE_SCHEMES:
+            raise ValueError(f"Endereços \"{m.group(1)}:\" não são abertos (podem executar programas do Windows).")
+    else:
         path = Path(os.path.expandvars(os.path.expanduser(target)))
         if not path.exists():
             raise ValueError(f"Não encontrei: {path}. Use o caminho completo (ex.: {Path.home() / 'Downloads'}).")
-        if path.suffix.lower() in EXECUTABLE and not ask_user(control.control_dir(), f"Executar o programa {path.name}?"):
-            raise ValueError("O usuário não autorizou executar esse programa.")
+        suffix = path.suffix.lower()
+        if not path.is_dir() and suffix not in SAFE_FILES:
+            what = (f"Executar o programa {path.name}?" if suffix in EXECUTABLE else
+                    f"Abrir {path.name}? Arquivos {suffix or 'sem extensão'} podem executar programas.")
+            if not ask_user(control.control_dir(), what):
+                raise ValueError("O usuário não autorizou abrir esse arquivo.")
         target = str(path)
     if _fake():
         _fake_log(action="open", target=target)
@@ -87,9 +102,49 @@ def load_alarms(base: Path) -> list[dict]:
 
 def save_alarms(base: Path, items: list[dict]) -> None:
     p = control.control_dir(base) / ALARMS
-    tmp = p.with_suffix(".tmp")
+    tmp = p.with_name(f"{p.stem}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp")   # never shared between processes
     tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
+    for attempt in range(10):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:          # Windows: the other process is reading it right now
+            time.sleep(0.05 * (attempt + 1))
     os.replace(tmp, p)
+
+
+class _AlarmsLock:
+    """Read-modify-write of the reminders file by two processes (the assistant's tool server adds, the Studio
+    removes the due ones) used to lose reminders. One lock file, created atomically; a stale one is broken."""
+
+    def __init__(self, base: Path, timeout: float = 5):
+        self.path = control.control_dir(base) / (ALARMS + ".lock")
+        self.timeout = timeout
+
+    def __enter__(self):
+        end = time.monotonic() + self.timeout
+        while True:
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > 10:   # left by a process that died
+                        self.path.unlink()
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() > end:
+                    raise TimeoutError("Arquivo de lembretes ocupado; tente de novo.")
+                time.sleep(0.02)
+
+    def __exit__(self, *exc):
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
 
 
 def add_alarm(base: Path, *, minutes: float | None = None, when: str | None = None, text: str = "Lembrete",
@@ -105,19 +160,26 @@ def add_alarm(base: Path, *, minutes: float | None = None, when: str | None = No
     item = {"id": uuid.uuid4().hex[:10], "at": at.timestamp(), "text": text.strip()[:200] or kind.capitalize(),
             "kind": kind, "agent": agent or os.environ.get("KAGUYA_DESKTOP_AGENT") or "codex",
             "at_text": at.strftime("%d/%m %H:%M") if at.date() != datetime.now().date() else at.strftime("%H:%M")}
-    items = load_alarms(base)
-    items.append(item)
-    save_alarms(base, items)
+    with _AlarmsLock(base):
+        items = load_alarms(base)
+        items.append(item)
+        save_alarms(base, items)
     return item
 
 
 def due_alarms(base: Path, now: float | None = None) -> list[dict]:
     """Remove and return the alarms whose time has come."""
     now = now or time.time()
-    items = load_alarms(base)
-    due = [i for i in items if i["at"] <= now]
-    if due:
-        save_alarms(base, [i for i in items if i["at"] > now])
+    if not (control.control_dir(base) / ALARMS).exists():
+        return []
+    try:
+        with _AlarmsLock(base, timeout=1):
+            items = load_alarms(base)
+            due = [i for i in items if i["at"] <= now]
+            if due:
+                save_alarms(base, [i for i in items if i["at"] > now])
+    except TimeoutError:
+        return []                         # busy: the next check (in under a second) gets them
     return due
 
 
@@ -150,7 +212,40 @@ def create_event(base: Path, title: str, start: str, end: str = "", location: st
 
 # ------------------------------------------------------------------ confirmation
 def ask_user(base: Path, action: str, timeout: float = 180) -> bool:
-    """Ask the Studio to show a Yes/No question; wait for the answer (no answer = no)."""
+    """Ask the Studio to show a Yes/No question; wait for the answer (no answer = no).
+
+    The answer comes back on the connection this process opened to the Studio (127.0.0.1, token of this task):
+    only a click in the Studio's window produces it. It used to be a file in a folder the assistant can write to
+    in "Meu computador" mode — the assistant could have answered "sim" to itself."""
+    port = int(os.environ.get("KAGUYA_CONFIRM_PORT") or 0)
+    token = os.environ.get("KAGUYA_CONFIRM_TOKEN", "")
+    if port and token:
+        return _ask_studio(port, token, action, timeout)
+    if not _fake():
+        return False            # no safe channel to the Studio: never assume "yes"
+    return _ask_by_files(base, action, timeout)   # test double only (fake desktop backend)
+
+
+def _ask_studio(port: int, token: str, action: str, timeout: float) -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+            s.settimeout(timeout)
+            s.sendall((json.dumps({"token": token, "tool": "confirmar", "args": {"action": action[:600]}},
+                                  ensure_ascii=False) + "\n").encode("utf-8"))
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+        rep = json.loads(buf.split(b"\n", 1)[0].decode("utf-8"))
+        return bool(rep.get("ok")) and rep.get("text") == "sim"
+    except (OSError, ValueError):
+        return False
+
+
+def _ask_by_files(base: Path, action: str, timeout: float) -> bool:
     folder = control.control_dir(base) / REQUESTS
     folder.mkdir(exist_ok=True)
     rid = uuid.uuid4().hex[:12]

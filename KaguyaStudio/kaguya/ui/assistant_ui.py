@@ -18,9 +18,41 @@ class AssistantWatcher:
         self.win = win
         self.base = win.engine.home / "desktop"
         self.shown: dict[str, QMessageBox] = {}
+        self.replies: dict[str, object] = {}       # request id → reply(ok, text) on the requester's connection
+        self.bridge = None
+        try:
+            from ..browser.bridge import make_bridge
+            self.bridge = make_bridge(self._tool, win, closed_msg="Confirmação encerrada (a tarefa terminou ou foi "
+                                                                  "parada).")
+            bridge = self.bridge
+            win.engine.confirm_bridge = lambda agent, task_id: {"port": bridge.port,
+                                                                "token": bridge.tokens.issue(agent, task_id)}
+            win.engine.confirm_release = bridge.tokens.revoke
+        except Exception:
+            self.bridge = None                      # no bridge → the assistants' confirmations answer "no"
         self.timer = QTimer(win, interval=700)
         self.timer.timeout.connect(self.tick)
         self.timer.start()
+
+    def _tool(self, agent: str, tool: str, args: dict, reply):
+        """Request from the desktop control server; the answer goes back only on that connection."""
+        if tool != "confirmar":
+            reply(False, "pedido desconhecido")
+            return
+        import uuid
+        rid = "c" + uuid.uuid4().hex[:11]
+        self.replies[rid] = reply
+        self.ask({"id": rid, "action": str(args.get("action", ""))[:600], "agent": agent})
+
+    def revoke_all(self):
+        """Parar: every pending question is answered "no" and no task can ask again."""
+        if self.bridge is not None:
+            self.bridge.tokens.revoke_all()
+        for rid in list(self.replies):
+            box = self.shown.pop(rid, None)
+            if box is not None:
+                box.close()
+            self.replies.pop(rid)(True, "nao")
 
     def stop(self):
         self.timer.stop()
@@ -34,7 +66,7 @@ class AssistantWatcher:
             due = assistant.due_alarms(self.base)
         except OSError:
             return
-        live = {r["id"] for r in reqs}
+        live = {r["id"] for r in reqs} | set(self.replies)
         for rid in [k for k in self.shown if k not in live]:  # timed out / answered elsewhere
             self.shown.pop(rid).close()
         for r in reqs:
@@ -69,6 +101,10 @@ class AssistantWatcher:
 
     def _answer(self, rid: str, yes: bool):
         if self.shown.pop(rid, None) is None:
+            return
+        reply = self.replies.pop(rid, None)
+        if reply is not None:                       # secure channel: only this click answers
+            reply(True, "sim" if yes else "nao")
             return
         try:
             assistant.answer_request(self.base, rid, yes)

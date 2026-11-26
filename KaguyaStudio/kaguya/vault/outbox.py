@@ -45,6 +45,32 @@ def _hash(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
+BOM = b"\xef\xbb\xbf"
+
+
+def _file_hash(path: Path) -> str:
+    """Hash of the note exactly as it is on disk (same at proposal and at approval, BOM or not)."""
+    return "b:" + sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _unchanged(path: Path, base_hash: str | None) -> bool:
+    if not base_hash:
+        return False
+    if base_hash.startswith("b:"):
+        return _file_hash(path) == base_hash
+    try:                                   # proposals made before 5.9.2 hashed the decoded text
+        return _hash(Path(path).read_text(encoding="utf-8")) == base_hash
+    except (OSError, ValueError):
+        return False
+
+
+def _read_note(path: Path) -> tuple[str, bool]:
+    """(text, had_bom). Invalid bytes raise: the note is never rewritten with replaced characters."""
+    raw = Path(path).read_bytes()
+    bom = raw.startswith(BOM)
+    return raw[len(BOM):].decode("utf-8") if bom else raw.decode("utf-8"), bom
+
+
 def _q(v: str) -> str:
     return json.dumps(v, ensure_ascii=False)
 
@@ -115,7 +141,8 @@ class Outbox:
             if not dest.exists():
                 dest.write_text(section, encoding="utf-8")
                 meta = {"kind": kind2, "title": f"{Path(rel).stem} ← {title}", "created": created, "target": rel,
-                        "base_hash": _hash(text), "digest": digest, "project": project, "source": source,
+                        "base_hash": _file_hash(self.root / rel) if (self.root / rel).is_file() else _hash(text),
+                        "digest": digest, "project": project, "source": source,
                         "source_url": source_url, "category": kind}
                 (self.staging / (name + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                                                             encoding="utf-8")
@@ -159,7 +186,8 @@ class Outbox:
         digest = _hash(rel + reason)[:12]
         name = f"revalidar-{slug(Path(rel).stem)}-{digest}.md"
         (self.staging / name).write_text(f"Motivo: {reason}\n", encoding="utf-8")
-        meta = {"kind": "revalidar", "title": f"Revalidar {Path(rel).stem}", "target": rel, "base_hash": _hash(text),
+        meta = {"kind": "revalidar", "title": f"Revalidar {Path(rel).stem}", "target": rel,
+                "base_hash": _file_hash(path),
                 "created": datetime.now().astimezone().isoformat(timespec="seconds"), "reason": reason}
         (self.staging / (name + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return self.staging / name
@@ -189,8 +217,8 @@ class Outbox:
                                 exists=True)
                     cur_path = (self.root / rel) if self.root else None
                     if cur_path is not None and cur_path.is_file():
-                        cur = cur_path.read_text(encoding="utf-8")
-                        item["stale"] = _hash(cur) != spec.get("base_hash")
+                        cur = _read_note(cur_path)[0]
+                        item["stale"] = not _unchanged(cur_path, spec.get("base_hash"))
                         new = self._result(spec, rel, cur, body)
                         item["diff"] = "".join(difflib.unified_diff(cur.splitlines(True), new.splitlines(True),
                                                                     f"{rel} (atual)", f"{rel} (proposta)", n=2))
@@ -241,15 +269,20 @@ class Outbox:
                     target = (self.root / spec["target"]).resolve()
                     if not target.is_relative_to(self.root) or not target.is_file():
                         continue
-                    cur = target.read_text(encoding="utf-8")
-                    if _hash(cur) != spec.get("base_hash"):
+                    if not _unchanged(target, spec.get("base_hash")):
                         self.last_error = (f"“{spec['target']}” mudou depois da proposta: nada foi alterado. "
                                            "Descarte e gere a proposta de novo.")
+                        continue
+                    try:
+                        cur, bom = _read_note(target)
+                    except UnicodeDecodeError:
+                        self.last_error = (f"“{spec['target']}” tem caracteres inválidos (não é UTF-8): nada foi "
+                                           "alterado para não estragar a nota. Abra e salve no Obsidian, depois aprove.")
                         continue
                     self._backup(target, spec["target"])
                     new = self._result(spec, spec["target"], cur, src.read_text(encoding="utf-8"))
                     tmp = target.with_name(target.name + ".kaguya-tmp")
-                    tmp.write_text(new, encoding="utf-8")
+                    tmp.write_text(new, encoding="utf-8-sig" if bom else "utf-8")   # keeps the note's own format
                     os.replace(tmp, target)            # atomic: a crash never leaves half a note
                     dest = target
                 else:
@@ -258,12 +291,18 @@ class Outbox:
                         continue
                     folder.mkdir(parents=True, exist_ok=True)
                     dest = folder / name
-                    with dest.open("x", encoding="utf-8") as fh:  # create-only: never overwrite
-                        fh.write(src.read_text(encoding="utf-8"))
+                    try:
+                        with dest.open("x", encoding="utf-8") as fh:  # create-only: never overwrite
+                            fh.write(src.read_text(encoding="utf-8"))
+                    except FileExistsError:
+                        self.last_error = (f"Já existe uma nota “{CATEGORIES[spec['kind']]}/{name}”: nada foi "
+                                           "sobrescrito. Renomeie ou apague a existente e aprove de novo.")
+                        continue
                 src.unlink()
                 meta.unlink()
                 done.append(dest)
-            except (OSError, ValueError, KeyError):
+            except (OSError, ValueError, KeyError) as exc:
+                self.last_error = f"Não foi possível aprovar “{name}”: {exc}"      # never silent
                 continue
         return done
 

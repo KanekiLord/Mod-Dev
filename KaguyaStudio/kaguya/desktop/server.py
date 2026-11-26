@@ -138,6 +138,10 @@ class Desktop:
             w = self._target()
             if w is not None and self.b.foreground() != w.handle:
                 self.b.focus(w)
+                if self.b.foreground() != w.handle:
+                    # Windows refused to bring it to the front (focus lock): keys/clicks would go to another app
+                    raise Refused(f"Não consegui trazer a janela \"{w.title}\" para a frente (o Windows bloqueou). "
+                                  "Nada foi digitado nem clicado. Peça ao usuário para clicar nela e tente de novo.")
 
     def _to_screen(self, x, y) -> tuple[int, int]:
         area = self._area()

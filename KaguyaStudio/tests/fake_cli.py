@@ -191,6 +191,9 @@ if name == "claude":
                 continue
             text = (msg.get("message") or {}).get("content", "")
             history.append(text)
+            if "demora" in text and os.environ.get("FAKE_LIVE_SLOW"):
+                import time as _t
+                _t.sleep(float(os.environ["FAKE_LIVE_SLOW"]))       # answers long after the Studio gave up
             reply = f"Entendi, você disse: {text}. Já são {len(history)} mensagens nesta conversa."
             if "implement" in text.lower():
                 reply += " Vou deixar na fila.\n[[TAREFA: " + text + "]]"

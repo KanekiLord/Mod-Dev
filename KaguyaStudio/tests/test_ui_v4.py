@@ -528,13 +528,17 @@ class PcModeUi(UiBase):
         base = self.engine.home / "desktop"
         import threading
         result = {}
-        th = threading.Thread(target=lambda: result.setdefault("ok", assistant.ask_user(base, "Enviar para Mamãe: oi", 10)))
-        th.start()
-        self.assertTrue(self.pump(lambda: bool(w.assistant.shown), 5))
-        box = next(iter(w.assistant.shown.values()))
-        self.assertIn("Enviar para Mamãe", box.text())
-        box.button(QMessageBox.Yes).click()
-        th.join(5)
+        from unittest import mock
+        info = w.engine.confirm_bridge("claude", t["id"])          # what the engine gives the control server
+        with mock.patch.dict(os.environ, {"KAGUYA_CONFIRM_PORT": str(info["port"]),
+                                          "KAGUYA_CONFIRM_TOKEN": info["token"]}):
+            th = threading.Thread(target=lambda: result.setdefault("ok", assistant.ask_user(base, "Enviar para Mamãe: oi", 10)))
+            th.start()
+            self.assertTrue(self.pump(lambda: bool(w.assistant.shown), 5))
+            box = next(iter(w.assistant.shown.values()))
+            self.assertIn("Enviar para Mamãe", box.text())
+            box.button(QMessageBox.Yes).click()
+            th.join(5)
         self.assertTrue(result["ok"])
         assistant.add_alarm(base, minutes=0.001, text="tirar o bolo", agent="claude")
         self.assertTrue(self.pump(lambda: any("tirar o bolo" in t for _, t in spoken), 5))
@@ -1473,3 +1477,62 @@ class BrowserPrivacyUi(UiBase):
         self.assertFalse(page.privacy.block_trackers)
         self.assertEqual(self.store.get_setting("browser.privacy")["dns"], "quad9")
         self.assertIn("Quad9", page.dns_status)
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class SecureConfirmUi(UiBase):
+    def test_only_a_click_in_the_studio_answers_and_stop_refuses(self):
+        import threading
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        from kaguya.desktop import assistant
+        w = self.window()
+        info = w.engine.confirm_bridge("claude", 999)
+        env = {"KAGUYA_CONFIRM_PORT": str(info["port"]), "KAGUYA_CONFIRM_TOKEN": info["token"],
+               "KAGUYA_DESKTOP_DIR": str(self.engine.home / "desktop")}
+        result = {}
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("KAGUYA_DESKTOP_BACKEND", None)
+            th = threading.Thread(target=lambda: result.setdefault("a", assistant.ask_user(None, "Enviar: oi", 10)))
+            th.start()
+            self.assertTrue(self.pump(lambda: bool(w.assistant.shown), 5))
+            box = next(iter(w.assistant.shown.values()))
+            box.done(QMessageBox.Yes)                                  # the user's click
+            th.join(5)
+            self.assertTrue(result["a"])
+            # Parar: a pending question is answered "no" and the task cannot ask again
+            th = threading.Thread(target=lambda: result.setdefault("b", assistant.ask_user(None, "Apagar tudo", 10)))
+            th.start()
+            self.assertTrue(self.pump(lambda: bool(w.assistant.shown), 5))
+            w.stop_desktop("botão Parar")
+            th.join(5)
+            self.assertFalse(result["b"])
+            self.assertFalse(assistant.ask_user(None, "de novo", 3))      # token revoked
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git"), "PySide6 e git necessários")
+class WakeCancelUi(UiBase):
+    def test_switching_off_while_starting_never_opens_the_microphone(self):
+        import threading
+        from unittest import mock
+        from kaguya.voice import stt
+        w = self.window()
+        self.store.set_setting("wake.consent", True)
+        w.voice_problems = lambda: []
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+
+        def slow_prepare(agent, cwd, progress=lambda t: None):
+            gate.wait(10)                              # still checking the assistants…
+            return {"codex": ("codex", None), "claude": ("claude", None)}
+        w.prepare_voice_session = slow_prepare
+        with mock.patch.object(stt, "model_cached", return_value=True), \
+                mock.patch("kaguya.live.session.LiveSession.start", side_effect=AssertionError("abriu o microfone")):
+            self.assertTrue(w.wake.start())
+            self.assertTrue(w.wake.starting)
+            w.set_wake(False)                           # …and you switch it off
+            gate.set()
+            self.pump(lambda: False, 1.5)
+        self.assertIsNone(w.wake.session)
+        self.assertFalse(w.wake.starting)
+        self.assertFalse(self.store.get_setting("wake.enabled", False))

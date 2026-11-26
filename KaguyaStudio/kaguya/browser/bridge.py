@@ -39,7 +39,8 @@ class Tokens:
             self._tokens.clear()
 
 
-def make_bridge(handler, parent=None):
+def make_bridge(handler, parent=None, closed_msg: str = "Acesso ao navegador do Studio encerrado (a tarefa terminou "
+                                                            "ou o usuário parou)."):
     """Qt TCP server on localhost. ``handler(agent, tool, args, reply)`` must eventually call ``reply(ok, text)``
     (it may answer later, e.g. after the user confirms something)."""
     from PySide6.QtCore import QObject
@@ -52,7 +53,7 @@ def make_bridge(handler, parent=None):
             self.server = QTcpServer(self)
             self.server.newConnection.connect(self._accept)
             if not self.server.listen(QHostAddress.LocalHost, 0):
-                raise RuntimeError("não foi possível abrir a ponte local do navegador")
+                raise RuntimeError("não foi possível abrir a ponte local do Studio")
             self.port = int(self.server.serverPort())
 
         def _accept(self):
@@ -85,7 +86,7 @@ def make_bridge(handler, parent=None):
                 return
             agent = self.tokens.agent(req.get("token", ""))
             if agent is None:
-                reply(False, "Acesso ao navegador do Studio encerrado (a tarefa terminou ou o usuário parou).")
+                reply(False, closed_msg)
                 return
             try:
                 handler(agent, str(req.get("tool", "")), dict(req.get("args") or {}), reply)

@@ -129,6 +129,11 @@ def claude_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
 
 def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
     cmd = [exe]
+    sandbox = "workspace-write" if opts.write else "read-only"
+    if not caps.flags or caps.has("--config") or caps.has("-c"):
+        # always THIS task's permissions — also when resuming: a resumed session used to keep the sandbox of the
+        # task that created it (a read-only question could resume a session allowed to write)
+        cmd += ["-c", f"sandbox_mode='{sandbox}'"]
     if (opts.autonomous or opts.pc) and opts.write and (not caps.flags or caps.has("--config") or caps.has("-c")):
         # builds such as Gradle need to download dependencies; the sandbox still limits writes to the project
         cmd += ["-c", "sandbox_workspace_write.network_access=true"]
@@ -147,8 +152,7 @@ def codex_command(exe: str, caps: Capabilities, opts: RunOptions) -> list[str]:
             cmd += ["--image", img]
     if structured:
         cmd.append("--json")
-    if not opts.resume:  # resume inherits the original sandbox/cwd
-        sandbox = "workspace-write" if opts.write else "read-only"
+    if not opts.resume:  # "exec resume" has no --sandbox flag: the -c sandbox_mode above covers it
         cmd += ["--sandbox", sandbox]
         if opts.workdir and (not caps.flags or caps.has("--cd") or caps.has("-C")):
             cmd += ["-C", opts.workdir]

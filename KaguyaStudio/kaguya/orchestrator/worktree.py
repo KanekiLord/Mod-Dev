@@ -23,8 +23,11 @@ def worktree_base(repo_root: Path) -> Path:
 
 
 def create(repo_root: Path, task_id: int, index: int, agent: str) -> tuple[Path, str]:
-    branch = f"kaguya/t{task_id}-{index}-{agent}"
-    path = worktree_base(repo_root) / f"t{task_id}-{index}-{agent}"
+    # a per-run suffix: a requeued task used to fail forever ("branch already exists")
+    import secrets
+    run = secrets.token_hex(3)
+    branch = f"kaguya/t{task_id}-{index}-{agent}-{run}"
+    path = worktree_base(repo_root) / f"t{task_id}-{index}-{agent}-{run}"
     path.parent.mkdir(parents=True, exist_ok=True)
     res = _git(repo_root, "worktree", "add", "-b", branch, str(path), "HEAD")
     if res.returncode != 0:

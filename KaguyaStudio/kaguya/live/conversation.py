@@ -102,9 +102,26 @@ class ClaudeConversation:
         with self._lock:
             self._ensure()
 
+    def _restart_clean(self):
+        """After a turn that never finished: drop the process so the next question cannot receive that turn's
+        late answer (it used to answer one question behind from then on)."""
+        with self._spawn:
+            proc, self.proc = self.proc, None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(5)
+            except Exception:
+                pass
+
     def ask(self, text: str, on_delta: OnDelta, cancel: threading.Event | None = None, timeout: float = 180) -> str:
         with self._lock:
             self._ensure()
+            while True:                       # nothing from an earlier turn may answer this one
+                try:
+                    self._events.get_nowait()
+                except queue.Empty:
+                    break
             msg = {"type": "user", "message": {"role": "user", "content": text}}
             try:
                 self.proc.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
@@ -140,6 +157,7 @@ class ClaudeConversation:
                     if ev.get("is_error") and not interrupted:
                         raise ConversationError(str(ev.get("result") or (ev.get("errors") or ["erro"])[-1])[:300])
                     return "".join(parts) or str(ev.get("result") or "")
+            self._restart_clean()
             raise ConversationError("O Claude não respondeu a tempo.")
 
     def interrupt(self):
@@ -213,6 +231,11 @@ class CodexConversation:
     def ask(self, text: str, on_delta: OnDelta, cancel: threading.Event | None = None, timeout: float = 180) -> str:
         if self.client is None or self.client.proc.poll() is not None:
             self._start()
+        while True:                           # leftovers of an earlier turn never reach this one
+            try:
+                self._notes.get_nowait()
+            except queue.Empty:
+                break
         res = self.client.request("turn/start", {"threadId": self.thread_id,
                                                  "input": [{"type": "text", "text": text}]})
         if "error" in res:
@@ -232,11 +255,15 @@ class CodexConversation:
                     raise ConversationError("O Codex encerrou (verifique login e limites em Diagnóstico).")
                 continue
             m, p = note.get("method"), note.get("params") or {}
+            other = p.get("turnId") or ((p.get("turn") or {}).get("id"))
+            if other and self.turn_id and other != self.turn_id:
+                continue                      # belongs to an earlier (interrupted/late) turn
             if m == "item/agentMessage/delta" and p.get("delta"):
                 parts.append(p["delta"])
                 if not interrupted:
                     on_delta(p["delta"])
             elif m == "error" or m == "thread/realtime/error":
+                self.interrupt()              # do not leave this turn running into the next question
                 raise ConversationError("Codex: " + str(p.get("message") or p.get("error") or "erro"))
             elif m == "turn/completed":
                 status = ((p.get("turn") or {}).get("status")) or "completed"
@@ -244,6 +271,7 @@ class CodexConversation:
                     err = ((p.get("turn") or {}).get("error") or {})
                     raise ConversationError("Codex: " + str(err.get("message") or "o turno falhou"))
                 return "".join(parts)
+        self.interrupt()
         raise ConversationError("O Codex não respondeu a tempo.")
 
     def interrupt(self):

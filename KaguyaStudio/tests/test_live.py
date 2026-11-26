@@ -123,6 +123,18 @@ class Session(SessionBase):
         for st in ("hearing", "transcribing", "thinking", "speaking"):
             self.assertIn(st, states)
 
+    def test_a_late_answer_never_answers_the_next_question(self):
+        from unittest import mock
+        env = dict(self.env, FAKE_LIVE_SLOW="3")
+        c = ClaudeConversation(self.exe["claude"], Path(self.tmp.name), env=env)
+        self.addCleanup(c.close)
+        with self.assertRaises(ConversationError):
+            c.ask("pergunta que demora", on_delta=lambda d: None, timeout=1)
+        time.sleep(3)                                        # the old turn's answer would have arrived by now
+        answer = c.ask("segunda pergunta", on_delta=lambda d: None, timeout=20)
+        self.assertIn("segunda pergunta", answer)
+        self.assertNotIn("demora", answer)
+
     def test_close_never_leaves_a_process_behind(self):
         c = ClaudeConversation(self.exe["claude"], Path(self.tmp.name), env=self.env)
         def warm():

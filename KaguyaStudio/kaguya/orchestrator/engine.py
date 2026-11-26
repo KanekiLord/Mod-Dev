@@ -70,6 +70,7 @@ class ProjectRuntime:
     thread: threading.Thread | None = None
     cancel: threading.Event | None = None
     task_id: int | None = None
+    finished: bool = False      # the loop decided to stop (the thread may still be returning)
 
 
 class Engine:
@@ -84,6 +85,9 @@ class Engine:
         self._hub = None
         self.locks = None
         self.browser_bridge = None
+        self.confirm_bridge = None        # Studio window that answers "confirm" (set by the UI)
+        self.confirm_release = None
+        self._confirm_tokens: dict[int, str] = {}
         self.browser_release = None
         self._browser_tokens: dict[int, str] = {}
         self.env = env
@@ -262,7 +266,7 @@ class Engine:
 
     def is_running(self, pid: int) -> bool:
         rt = self.runtimes.get(pid)
-        return bool(rt and rt.thread and rt.thread.is_alive())
+        return bool(rt and rt.thread and rt.thread.is_alive() and not rt.finished)
 
     def current_task(self, pid: int) -> int | None:
         rt = self.runtimes.get(pid)
@@ -307,6 +311,9 @@ class Engine:
             tok = self._browser_tokens.pop(tid, None)
             if tok and self.browser_release:
                 self.browser_release(tok)
+            ctok = self._confirm_tokens.pop(tid, None)
+            if ctok and self.confirm_release:
+                self.confirm_release(ctok)
             self.emit("desktop", pid=pid, task_id=tid, active=False)
             self.store.append_event(tid, "warning", f"A tarefa não respondeu ao Cancelar em {int(wait)} s; a fila foi "
                                     "liberada mesmo assim (o processo travado foi abandonado).")
@@ -320,10 +327,22 @@ class Engine:
             rt.thread.join(timeout)
 
     def _worker(self, pid: int, rt: ProjectRuntime) -> None:
+        try:
+            self._work_loop(pid, rt)
+        finally:
+            with self._lock:
+                rt.finished = True       # from here on start_worker() starts a new worker
+                mine = self.runtimes.get(pid) is rt
+        if mine:                         # an abandoned (force-released) worker says nothing
+            self.emit("worker_idle", pid=pid)
+
+    def _work_loop(self, pid: int, rt: ProjectRuntime) -> None:
         while not rt.cancel.is_set():
-            task = self.store.claim(pid)
-            if task is None:
-                break
+            with self._lock:   # same lock as start_worker: a task queued now is either claimed here or gets a worker
+                task = self.store.claim(pid)
+                if task is None:
+                    rt.finished = True
+                    break
             rt.task_id = task["id"]
             self.emit("task_started", pid=pid, task_id=task["id"], target=task["target"], title=task["title"])
             status, summary = "error", ""
@@ -356,6 +375,9 @@ class Engine:
             tok = self._browser_tokens.pop(task["id"], None)
             if tok and self.browser_release:
                 self.browser_release(tok)   # the assistant loses browser access the moment the task ends
+            ctok = self._confirm_tokens.pop(task["id"], None)
+            if ctok and self.confirm_release:
+                self.confirm_release(ctok)
             if rt.cancel.is_set() and status not in ("approved",):
                 status = "cancelled"
                 summary = summary or "Interrompido pelo usuário."
@@ -368,7 +390,6 @@ class Engine:
                 # don't burn limits on the rest of the queue after a failure
                 self.emit("log", pid=pid, message="Fila pausada após falha; reative quando resolver o problema.")
                 break
-        self.emit("worker_idle", pid=pid)
 
     # ------------------------------------------------------------ desktop
     def _desktop_window(self, pid: int | None = None) -> str:
@@ -455,6 +476,11 @@ class Engine:
                "KAGUYA_DESKTOP_MAX": str(int(self.setting("desktop.max_actions") or 400))}
         if self.store.is_pc(pid):
             env["KAGUYA_DESKTOP_PC"] = "1"
+        if self.confirm_bridge is not None:      # confirmations travel on a connection only the Studio answers
+            info = self.confirm_bridge(env["KAGUYA_DESKTOP_AGENT"], task["id"])
+            if info:
+                self._confirm_tokens[task["id"]] = info["token"]
+                env["KAGUYA_CONFIRM_PORT"], env["KAGUYA_CONFIRM_TOKEN"] = str(info["port"]), info["token"]
         if not getattr(sys, "frozen", False):
             env["PYTHONPATH"] = str(APP_ROOT)
         for k in ("KAGUYA_DESKTOP_BACKEND", "KAGUYA_DESKTOP_FAKE_LOG"):  # test doubles
@@ -780,6 +806,7 @@ class Engine:
                 if cancel.is_set():
                     return
                 info = {"agent": agent, "task": text}
+                wt = branch = None
                 try:
                     wt, branch = worktree.create(Path(root), tid, i, agent)
                     info.update(path=str(wt), branch=branch)
@@ -800,6 +827,14 @@ class Engine:
                     info.update(ok=False, error=str(exc))
                 except Exception as exc:
                     info.update(ok=False, error=f"Erro interno: {exc}")
+                finally:
+                    if wt is not None:
+                        # the work lives in the branch (diff/integrate use it): the folder is no longer needed;
+                        # a branch with nothing committed is removed too (they used to pile up forever)
+                        try:
+                            worktree.remove(Path(root), wt, None if info.get("committed") else branch)
+                        except Exception:
+                            pass
                 with lock:
                     results[i] = info
                 self.store.append_event(tid, "worktree", json.dumps(info, ensure_ascii=False), agent)
