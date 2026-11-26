@@ -105,7 +105,7 @@ class PrivacyDialog(QDialog):
                                  "anônimas e abas de pesquisa das IAs não gravam nada e nunca veem seus logins. "
                                  "Nenhuma IA vê uma aba até você compartilhar.", "dim", wrap=True))
         clear = button("Apagar dados de navegação…", "trash", "ghost")
-        clear.clicked.connect(page.clear_data)
+        clear.clicked.connect(lambda: page.clear_data())   # clicked(False) would skip the question
         data.lay.addWidget(clear)
         lay.addWidget(data)
         lay.addStretch(1)
@@ -121,16 +121,16 @@ class PrivacyDialog(QDialog):
 
     def save(self):
         st = self.page.privacy
+        proxy = self.proxy.text().strip()
+        if proxy and not proxy.startswith(("socks5://", "socks4://", "http://", "https://")):   # check before changing
+            self.proxy.setStyleSheet(f"border: 1px solid {C['danger']};")
+            self.proxy.setToolTip("Use socks5://host:porta ou http://host:porta")
+            return
         st.https_only = self.t_https.isChecked()
         st.block_trackers = self.t_trackers.isChecked()
         st.block_third_party_cookies = self.t_cookies.isChecked()
         checked = self.dns_group.checkedButton()
         st.dns = checked.property("key") if checked is not None else "sistema"
-        proxy = self.proxy.text().strip()
-        if proxy and not proxy.startswith(("socks5://", "socks4://", "http://", "https://")):
-            self.proxy.setStyleSheet(f"border: 1px solid {C['danger']};")
-            self.proxy.setToolTip("Use socks5://host:porta ou http://host:porta")
-            return
         restart = proxy != st.proxy
         st.proxy = proxy
         self.page.apply_privacy()

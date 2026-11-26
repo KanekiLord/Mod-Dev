@@ -1316,6 +1316,29 @@ class FreezeFixesUi(UiBase):
         self.assertIn(str(other), w.settings.packs_info.text())
         self.assertIn("baixado", w.settings.packs_info.text())
 
+    def test_download_failure_is_shown_and_live_checks_a_late_assistant(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        from kaguya.voice import stt
+        from kaguya.ui.packs_ui import ensure_stt_model
+        w = self.window()
+        w.confirm_download = None                                  # the real dialog path (with progress bar)
+        warned = []
+        with mock.patch("kaguya.ui.packs_ui.QMessageBox.question", return_value=QMessageBox.Yes), \
+                mock.patch("kaguya.ui.packs_ui.QMessageBox.warning", side_effect=lambda *a: warned.append(a[2])), \
+                mock.patch.object(stt, "download", side_effect=RuntimeError("O download parou há 120 s")):
+            ensure_stt_model(w, "small", lambda: None)
+            self.assertTrue(self.pump(lambda: warned, 10))
+        self.assertIn("parou", warned[0])                          # the error reaches you (it used to vanish)
+        # Live started while one assistant was still being checked: it is checked on first use, never None
+        asked = []
+        w.engine.ensure_ready = lambda a, cwd, cancel=None: asked.append(a) or (_ for _ in ()).throw(
+            RuntimeError("claude não está pronto"))
+        make = w.conversation_factory({"codex": RuntimeError("sem codex")}, str(self.project))
+        with self.assertRaisesRegex(RuntimeError, "claude não está pronto"):
+            make("claude")
+        self.assertEqual(asked, ["claude"])
+
     def test_queue_interrupt_button_frees_a_running_task(self):
         import threading
         from kaguya.messages import Intent
@@ -1395,9 +1418,20 @@ class BrowserPrivacyUi(UiBase):
         view = page._cur()
         page._guard()
         # a site without HTTPS: warning page, opening only after your click, only for that site
-        page._no_https_page(view, "http://exemplo.com/pagina")
-        page._internal(view.page(), "kaguya:permitir-http?u=http%3A%2F%2Fexemplo.com%2Fpagina")
+        page._internal(view.page(), "kaguya:permitir-http?u=http%3A%2F%2Fmalicioso.com%2F")   # a site trying it
+        self.assertNotIn("malicioso.com", page.guard.allowed_http)                         # no token: ignored
+        page._no_https_page(view, "http://exemplo.com/busca?q=a%26b")
+        tok = view.http_token
+        page._internal(view.page(), "kaguya:permitir-http?t=wrong&u=http%3A%2F%2Fexemplo.com%2F")
+        self.assertNotIn("exemplo.com", page.guard.allowed_http)                          # wrong token: ignored
+        loaded = []
+        view.load = lambda u: loaded.append(u.toString())
+        page._internal(view.page(), f"kaguya:permitir-http?t={tok}&u=http%3A%2F%2Fexemplo.com%2Fbusca%3Fq%3Da%2526b")
         self.assertIn("exemplo.com", page.guard.allowed_http)
+        self.assertEqual(loaded, ["http://exemplo.com/busca?q=a%26b"])                    # decoded exactly once
+        page._internal(view.page(), f"kaguya:permitir-http?t={tok}&u=http%3A%2F%2Foutro.com%2F")
+        self.assertNotIn("outro.com", page.guard.allowed_http)                            # token is single-use
+        del view.load
         # camera/microphone/location: asked; "no" denies
         perm = mock.Mock()
         perm.origin.return_value.host.return_value = "site.com"
@@ -1413,12 +1447,24 @@ class BrowserPrivacyUi(UiBase):
         page._cert_error(view, err)
         err.rejectCertificate.assert_called_once()
         self.assertIn("certificado expirado", page.cert_errors[view.tab_id])
+        page._navigation_started(view.page(), "https://outro-site.com/")                  # next page: clean slate
+        self.assertNotIn(view.tab_id, page.cert_errors)
         # clear browsing data
         page.data.visit("https://exemplo.com", "Exemplo")
         self.assertTrue(page.data.history(""))
         page.confirm_hook = lambda text: True
         self.assertTrue(page.clear_data())
         self.assertEqual(page.data.history(""), [])
+        # the dialog's own "apagar dados" button asks first (clicked(False) used to skip the question)
+        page.data.visit("https://exemplo.com", "Exemplo")
+        asked = []
+        page.confirm_hook = lambda text: asked.append(text) or False
+        dlg = page.open_privacy()
+        from PySide6.QtWidgets import QPushButton
+        next(b for b in dlg.findChildren(QPushButton) if "Apagar dados" in b.text()).click()
+        self.assertTrue(asked)
+        self.assertTrue(page.data.history(""))                     # said no: nothing deleted
+        dlg.reject()
         # settings dialog saves the switches
         dlg = page.open_privacy()
         dlg.t_trackers.setChecked(False)

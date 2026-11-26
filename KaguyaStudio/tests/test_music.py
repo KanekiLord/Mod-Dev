@@ -125,6 +125,11 @@ class RealPlayer(unittest.TestCase):
         self.p.set_shuffle(False)
         self.assertEqual(self.p.queue, ids)                                  # original order back
         self.assertEqual(self.p.queue[self.p.index], current)
+        self.p.set_shuffle(True)
+        extra = ids[:1]
+        self.p.queue_add(extra)                                              # "coloca X na fila" while shuffling
+        self.p.set_shuffle(False)
+        self.assertEqual(self.p.queue, ids + extra)                          # the added song is not lost
 
     def test_plays_advances_queue_volume_and_ducking(self):
         reply = self.p.execute("play", "")

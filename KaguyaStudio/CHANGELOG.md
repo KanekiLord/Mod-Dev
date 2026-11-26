@@ -1,5 +1,25 @@
 # Changelog
 
+## 5.9.1 — 26/11/2026 (verificação completa do código, parte 1)
+
+### Corrigido — erro grave que deixava telas "travadas"
+- **Todo erro de tarefa em segundo plano era perdido.** O aviso de erro era entregue depois, na tela, por uma função
+  que usava a variável do erro — que o Python apaga ao sair do bloco `except`. O aviso quebrava e a tela nunca saía
+  do estado "trabalhando" ("Transcrevendo…", "Preparando…", escuta "ligando"…). Agora o erro chega sempre.
+
+### Corrigido — achados da revisão
+- Navegador: o botão "Apagar dados de navegação…" da janela de privacidade apagava sem perguntar; um site podia
+  desligar o "HTTPS sempre" navegando para um link interno (agora só a página de aviso do Studio, com código de uso
+  único); o cadeado vermelho de um certificado ruim continuava nas páginas seguintes; o aviso "site sem HTTPS"
+  aparecia ao cancelar um carregamento; proxy inválido mudava as outras opções antes de ser recusado; navegador
+  funciona também em Qt 6.6–6.7 (permissões pelo caminho antigo).
+- Download do modelo de voz que falhava sumia sem mensagem.
+- Aleatório: músicas colocadas na fila enquanto embaralhava sumiam ao desligar.
+- Live: falar com a IA cuja verificação ainda não tinha terminado dava erro interno.
+- "Mudar pasta…": tudo ou nada (desfaz se falhar no meio), não com o Live/escuta ligados, e o ambiente do Qwen
+  continua funcionando depois de mudar de pasta.
+- Cancelar à força também libera o que a tarefa travada segurava (arquivo 3D, acesso ao navegador, controle do PC).
+
 ## 5.9.0 — 26/11/2026 (Kaguya Browser reorganizado e protegido)
 
 ### Tela

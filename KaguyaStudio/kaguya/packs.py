@@ -101,25 +101,53 @@ def human(n: int | None) -> str:
 
 
 def move(src: Path, dst: Path, progress=None) -> list[str]:
-    """Move the installed packs to the new folder. Returns what was moved; refuses to overwrite."""
+    """Move the installed packs to the new folder: all or nothing (checked before, undone on failure),
+    never overwriting. Python environments inside (Qwen3-TTS) are re-pointed to their new place."""
     src, dst = Path(src), Path(dst)
     if src.resolve() == dst.resolve():
         return []
-    moved = []
-    dst.mkdir(parents=True, exist_ok=True)
-    for sub in SUBDIRS:
-        a, b = src / sub, dst / sub
-        if not a.is_dir():
-            continue
+    todo = [sub for sub in SUBDIRS if (src / sub).is_dir()]
+    for sub in todo:
+        b = dst / sub
         if b.exists() and any(b.iterdir()):
             raise FileExistsError(f"A pasta de destino já tem '{sub}'. Escolha uma pasta vazia ou apague-a antes.")
-        if progress:
-            progress(f"Movendo {sub}…")
-        if b.exists():
-            b.rmdir()
-        shutil.move(str(a), str(b))
-        moved.append(sub)
+    dst.mkdir(parents=True, exist_ok=True)
+    moved: list[str] = []
+    try:
+        for sub in todo:
+            if progress:
+                progress(f"Movendo {sub}…")
+            b = dst / sub
+            if b.exists():
+                b.rmdir()
+            shutil.move(str(src / sub), str(b))
+            moved.append(sub)
+    except Exception:
+        for sub in reversed(moved):        # undo: everything goes back where it was
+            try:
+                shutil.move(str(dst / sub), str(src / sub))
+            except Exception:
+                pass
+        raise
+    _repoint_venvs(dst / "vozes", src / "vozes", dst / "vozes")
     return moved
+
+
+def _repoint_venvs(root: Path, old: Path, new: Path) -> None:
+    """A moved virtual environment still names its old Python folder in pyvenv.cfg: point it to the new one."""
+    if not root.is_dir():
+        return
+    olds = {str(old), str(old.resolve()) if old.exists() else str(old)}
+    for cfg in root.rglob("pyvenv.cfg"):
+        try:
+            text = cfg.read_text(encoding="utf-8")
+            fixed = text
+            for o in olds:
+                fixed = fixed.replace(o, str(new))
+            if fixed != text:
+                cfg.write_text(fixed, encoding="utf-8")
+        except OSError:
+            pass
 
 
 def apply(store, path: Path) -> None:

@@ -101,11 +101,18 @@ def _dialog(win, home, need, current=None) -> Path | None:
 def change_packs_dir(win, done=None) -> None:
     """Configurações › Voz › Mudar pasta: choose, then move what is installed (in the background)."""
     old = win.engine.packs
+    if getattr(win, "live_window", None) is not None or win.wake.running or win.voice.downloading:
+        QMessageBox.information(win, "Pasta dos pacotes", "Feche o Modo Live, desligue a escuta por nome e espere "
+                                "downloads terminarem antes de mudar a pasta (os modelos estão em uso).")
+        return
     chooser = getattr(win, "choose_packs_dir", None)
     new = chooser(win.engine.home, None) if chooser else _dialog(win, win.engine.home, None, old)
     if new is None or Path(new) == Path(old):
         return
     win.voice.close_engines()
+    win.voice.transcriber = None          # loaded models keep files open on Windows
+    import gc
+    gc.collect()
 
     def work():
         return packs.move(old, new) if packs.has_content(old) else []
@@ -118,7 +125,9 @@ def change_packs_dir(win, done=None) -> None:
             done()
 
     def fail(exc, _tb):
-        QMessageBox.warning(win, "Pasta dos pacotes", f"Não foi possível mover os pacotes: {exc}\nNada foi alterado.")
+        QMessageBox.warning(win, "Pasta dos pacotes", f"Não foi possível mover os pacotes: {exc}\n"
+                            "Tudo continua na pasta anterior.")
+        win.voice.relocate()
     run_bg(work, ok, fail)
 
 
@@ -167,14 +176,17 @@ def ensure_stt_model(win, model: str, then, on_cancel=None) -> None:
 
     def finished(_r):
         if dlg is not None:
+            dlg.canceled.disconnect()
             dlg.close()
         win.toast(f"Modelo de transcrição \"{model}\" pronto.")
         then()
 
     def failed(exc, _tb):
+        by_user = cancel.is_set()          # read first: closing a QProgressDialog emits canceled
         if dlg is not None:
+            dlg.canceled.disconnect()
             dlg.close()
-        if not cancel.is_set():
+        if not by_user:
             QMessageBox.warning(win, "Modelo de transcrição", str(exc))
         if on_cancel:
             on_cancel()

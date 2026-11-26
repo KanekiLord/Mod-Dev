@@ -209,7 +209,7 @@ class SapiWorker:
         def reader():
             try:
                 for line in proc.stdout:
-                    lines.put(line.strip())
+                    lines.put(line.strip().lstrip("\ufeff"))
             except (OSError, ValueError):
                 pass
             lines.put(None)

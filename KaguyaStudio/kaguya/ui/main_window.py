@@ -1254,6 +1254,12 @@ class MainWindow(QMainWindow):
         def make(a):
             from .. import persona
             res = exes.get(a)
+            if res is None:                # its check had not finished when the Live started: finish it now
+                try:
+                    res = engine.ensure_ready(a, cwd)
+                except Exception as exc:
+                    res = exc
+                exes[a] = res
             if isinstance(res, Exception):
                 raise res
             exe, _caps = res
@@ -1292,7 +1298,7 @@ class MainWindow(QMainWindow):
             return
         if isinstance(exes.get(agent), Exception):
             other = "claude" if agent == "codex" else "codex"
-            if not isinstance(exes.get(other), Exception):
+            if isinstance(exes.get(other), tuple):          # only an assistant that is really ready
                 self.toast(f"{AGENT[agent]['name']} não está pronto; o Live começa com {AGENT[other]['name']}.")
                 agent = other
             else:

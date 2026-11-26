@@ -298,9 +298,16 @@ class Engine:
         with self._lock:
             if self.runtimes.get(pid) is not rt:
                 return
-            self.runtimes.pop(pid, None)     # the stuck thread is abandoned: it can no longer write anything
+            self.runtimes.pop(pid, None)     # the stuck thread is abandoned: its later results are discarded
         tid = rt.task_id
         if tid is not None:
+            # free what it held so the next task does not wait on it: 3D-file lock, browser access, desktop
+            if self.locks is not None:
+                self.locks.release(f"tarefa #{tid}")
+            tok = self._browser_tokens.pop(tid, None)
+            if tok and self.browser_release:
+                self.browser_release(tok)
+            self.emit("desktop", pid=pid, task_id=tid, active=False)
             self.store.append_event(tid, "warning", f"A tarefa não respondeu ao Cancelar em {int(wait)} s; a fila foi "
                                     "liberada mesmo assim (o processo travado foi abandonado).")
             self.store.complete(tid, "cancelled", "Interrompido pelo usuário (liberado à força).")

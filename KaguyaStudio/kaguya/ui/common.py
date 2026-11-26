@@ -56,12 +56,14 @@ def run_bg(fn, on_done=None, on_error=None) -> threading.Thread:
             except Exception as exc:  # reported to the UI, never swallowed
                 tb = traceback.format_exc()
                 if on_error:
-                    _deliver(lambda: on_error(exc, tb))
+                    # bind now: Python deletes ``exc`` when this block ends, and the handler runs later on the
+                    # GUI thread — a plain closure raised NameError there and every background error was lost
+                    _deliver(lambda e=exc, t=tb: on_error(e, t))
                 else:
                     print(tb, file=sys.stderr)
                 return
             if on_done:
-                _deliver(lambda: on_done(result))
+                _deliver(lambda r=result: on_done(r))
         finally:
             with _threads_lock:
                 _threads.discard(threading.current_thread())

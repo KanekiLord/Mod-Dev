@@ -319,8 +319,10 @@ class BrowserPage(QWidget):
 
             def acceptNavigationRequest(self, url, _type, is_main):   # noqa: N802 (Qt name)
                 if url.scheme() == "kaguya":
-                    studio._internal(self, url.toString())
+                    studio._internal(self, url.toString())   # honoured only with this tab's one-time token
                     return False
+                if is_main:
+                    studio._navigation_started(self, url.toString())
                 return super().acceptNavigationRequest(url, _type, is_main)
 
         frame = QFrame()
@@ -330,8 +332,13 @@ class BrowserPage(QWidget):
         view = QWebEngineView(frame)
         page = Page(self._profile(private, agents=bool(owner)), view)
         view.setPage(page)
-        page.permissionRequested.connect(lambda perm, v=view: self._permission(v, perm))
+        if hasattr(page, "permissionRequested"):          # Qt 6.8+
+            page.permissionRequested.connect(lambda perm, v=view: self._permission(v, perm))
+        else:                                              # older Qt: same question, older signal
+            page.featurePermissionRequested.connect(
+                lambda origin, feat, v=view, pg=page: self._feature_permission(v, pg, origin, feat))
         page.certificateError.connect(lambda err, v=view: self._cert_error(v, err))
+        page.loadingChanged.connect(lambda info, v=view: self._loading(v, info))
         view.tab_id, view.private, view.frame = tab_id, private or bool(owner), frame
         if owner:   # research tab of an assistant: isolated profile, shared with and controlled by it, visible to you
             self.shares.tab(tab_id).owner = owner
@@ -358,6 +365,7 @@ class BrowserPage(QWidget):
             self.views.pop(view.tab_id, None)
             self.reports.pop(view.tab_id, None)
             self.private.discard(view.tab_id)
+            self.cert_errors.pop(view.tab_id, None)
         self.tabs.removeTab(index)
         frame.deleteLater()
         if self.tabs.count() == 0:
@@ -418,11 +426,6 @@ class BrowserPage(QWidget):
                 self.side.hide()
 
     def _loaded(self, view, ok: bool):
-        url = view.url().toString()
-        h = __import__("kaguya.browser.privacy", fromlist=["x"]).host(url)
-        if (not ok and url.startswith("https://") and self.guard is not None and h in self.guard.upgraded
-                and h not in self.guard.allowed_http and view.tab_id not in self.cert_errors):
-            self._no_https_page(view, "http://" + url[len("https://"):])
         self._title(view)
         if view is self._cur():
             self._sync()
@@ -568,6 +571,14 @@ class BrowserPage(QWidget):
         else:
             perm.deny()
 
+    def _feature_permission(self, view, page, origin, feature):
+        from PySide6.QtWebEngineCore import QWebEnginePage
+        from .browser_guard import permission_text
+        what, site = permission_text(feature), origin.host() or origin.toString()
+        ok = self._confirm(f"O site {site} quer usar {what}.\n\nPermitir só para este site?")
+        page.setFeaturePermission(origin, feature, QWebEnginePage.PermissionGrantedByUser if ok
+                                  else QWebEnginePage.PermissionDeniedByUser)
+
     def _cert_error(self, view, err):
         # never "continue anyway" in silence: the page is blocked and the reason is shown
         self.cert_errors[view.tab_id] = err.description()
@@ -580,31 +591,70 @@ class BrowserPage(QWidget):
         self.win.toast("Página bloqueada: certificado de segurança inválido (" + err.description()[:120] + ").")
 
     def _no_https_page(self, view, http_url: str):
+        import secrets
         from html import escape
         from urllib.parse import quote
+        view.http_token = tok = secrets.token_urlsafe(12)
         h = escape(__import__("kaguya.browser.privacy", fromlist=["x"]).host(http_url))
         html = (f"<html><body style='background:#17121f;color:#eee;font-family:Segoe UI,sans-serif;padding:60px'>"
                 f"<h2 style='color:#f0c674'>Este site não oferece conexão segura</h2>"
                 f"<p>{h} não respondeu com HTTPS (criptografia). Sem ela, quem está na mesma rede (Wi-Fi, provedor) "
                 f"pode ver e alterar o que você vê e digita.</p><p>Não digite senhas nem dados pessoais nele.</p>"
-                f"<p><a style='color:#f0c674' href='kaguya:permitir-http?u={quote(http_url, safe='')}'>"
+                f"<p><a style='color:#f0c674' href='kaguya:permitir-http?t={tok}&u={quote(http_url, safe='')}'>"
                 f"Abrir mesmo assim, sem criptografia (só este site, até fechar o Studio)</a></p>"
-                f"<p><a style='color:#aaa' href='kaguya:voltar'>Voltar</a></p></body></html>")
+                f"<p><a style='color:#aaa' href='kaguya:voltar?t={tok}'>Voltar</a></p></body></html>")
         view.setHtml(html, QUrl("about:blank"))
 
     def _internal(self, page, url: str):
-        from urllib.parse import parse_qs, unquote, urlsplit
+        """kaguya: links work only from the Studio's own warning page (one-time token for that tab), so no
+        website can switch the protection off by navigating to them."""
+        from urllib.parse import parse_qs, urlsplit
         view = next((v for v in self.views.values() if v.page() is page), None)
         if view is None:
             return
+        q = parse_qs(urlsplit(url).query)                       # already decoded once (no second unquote)
+        token = q.get("t", [""])[0]
+        expected = getattr(view, "http_token", None)
+        if not expected or token != expected:
+            return
+        view.http_token = None
         if url.startswith("kaguya:permitir-http"):
-            target = unquote(parse_qs(urlsplit(url).query).get("u", [""])[0])
+            target = q.get("u", [""])[0]
             from ..browser import privacy
             if self.guard is not None and target.startswith("http://"):
                 self.guard.allowed_http.add(privacy.host(target))
                 view.load(QUrl(target))
         elif url.startswith("kaguya:voltar"):
             view.back() if view.history().canGoBack() else self._navigate(view, HOME)
+
+    def _navigation_started(self, page, url: str):
+        """A new page in this tab: forget the previous page's certificate problem; remember an HTTPS upgrade."""
+        from ..browser import privacy
+        view = next((v for v in self.views.values() if v.page() is page), None)
+        if view is None:
+            return
+        self.cert_errors.pop(view.tab_id, None)
+        h = privacy.host(url)
+        view.upgrading = (h if (self.privacy.https_only and privacy.upgrade(url) and self.guard is not None
+                                and h not in self.guard.allowed_http) else None)
+
+    # network failures that mean "this site has no working HTTPS" (Chromium net error codes)
+    NO_HTTPS_ERRORS = {-100, -101, -102, -104, -105, -106, -107, -109, -113, -118, -324}
+
+    def _loading(self, view, info):
+        from PySide6.QtWebEngineCore import QWebEngineLoadingInfo as L
+        from ..browser import privacy
+        if info.status() == L.LoadStatus.LoadSucceededStatus:
+            view.upgrading = None
+            return
+        if info.status() != L.LoadStatus.LoadFailedStatus:
+            return
+        url = info.url().toString()
+        h = privacy.host(url)
+        if (getattr(view, "upgrading", None) == h and url.startswith("https://")
+                and info.errorCode() in self.NO_HTTPS_ERRORS and view.tab_id not in self.cert_errors):
+            view.upgrading = None
+            self._no_https_page(view, "http://" + url[len("https://"):])
 
     def toggle_fullscreen(self):
         self.win.set_browser_fullscreen(not getattr(self.win, "browser_fullscreen", False))

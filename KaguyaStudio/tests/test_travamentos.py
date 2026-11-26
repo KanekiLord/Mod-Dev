@@ -62,6 +62,9 @@ class Queue(Base):
         eng._run_single = frozen
         first = eng.submit(self.pid, Intent("execute", "codex", "tarefa travada"))
         self.assertTrue(self._until(lambda: eng.current_task(self.pid) == first))
+        from kaguya.hub.router import ResourceLocks
+        eng.locks = eng.locks or ResourceLocks()
+        eng.locks.acquire(["app:Blender"], f"tarefa #{first}")              # what the stuck task held
         second = eng.submit(self.pid, Intent("execute", "codex", "explique o projeto"))
         self.assertEqual(self.store.get_task(second)["status"], "queued")      # waits behind the stuck one
         eng.cancel(self.pid, grace=1)
@@ -70,6 +73,7 @@ class Queue(Base):
         eng.start_worker(self.pid)                                             # (a new message does this)
         self.assertTrue(self._until(lambda: self.store.get_task(second)["status"] == "executed", 60),
                         self.store.get_task(second)["result"])
+        self.assertEqual(eng.locks.held(), {})                                 # …released for the next task
         stuck.set()                                                            # the abandoned thread wakes up…
         time.sleep(0.5)
         self.assertEqual(self.store.get_task(first)["status"], "cancelled")    # …and changes nothing
@@ -185,6 +189,38 @@ class Packs(unittest.TestCase):
             (old / "modelos" / "x").write_text("y")
             with self.assertRaises(FileExistsError):
                 packs.move(old, new)                          # never overwrites
+
+    def test_move_is_all_or_nothing_and_fixes_python_envs(self):
+        with tempfile.TemporaryDirectory() as d:
+            old, new = Path(d) / "a", Path(d) / "b"
+            (old / "modelos").mkdir(parents=True)
+            (old / "modelos" / "m.bin").write_bytes(b"1")
+            venv = old / "vozes" / "qwen3" / "venv"
+            venv.mkdir(parents=True)
+            (venv / "pyvenv.cfg").write_text(f"home = {old / 'vozes' / 'qwen3' / 'python' / 'cpython'}\n")
+            (new / "vozes").mkdir(parents=True)
+            (new / "vozes" / "x").write_text("ocupado")
+            with self.assertRaises(FileExistsError):
+                packs.move(old, new)                          # refused before moving anything
+            self.assertTrue((old / "modelos" / "m.bin").exists())
+            (new / "vozes" / "x").unlink()
+            real = shutil.move
+            calls = []
+
+            def flaky(a, b):
+                calls.append(a)
+                if len(calls) == 2:
+                    raise OSError("arquivo em uso")
+                return real(a, b)
+            with mock.patch("kaguya.packs.shutil.move", side_effect=flaky):
+                with self.assertRaises(OSError):
+                    packs.move(old, new)
+            self.assertTrue((old / "modelos" / "m.bin").exists())    # the first move was undone
+            self.assertFalse((new / "modelos").exists())
+            packs.move(old, new)
+            cfg = (new / "vozes" / "qwen3" / "venv" / "pyvenv.cfg").read_text()
+            self.assertIn(str(new / "vozes" / "qwen3" / "python"), cfg)  # the moved env finds its Python
+            self.assertNotIn(str(old), cfg)
 
 
 if __name__ == "__main__":

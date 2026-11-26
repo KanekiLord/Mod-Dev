@@ -127,7 +127,10 @@ class MusicPlayer(QObject):
         self.player.setPosition(max(0, int(ms)))
 
     def queue_add(self, ids: list[int]):
-        self.queue.extend(i for i in ids if i)
+        new = [i for i in ids if i]
+        self.queue.extend(new)
+        if self._ordered is not None:
+            self._ordered.extend(new)     # kept when shuffle is turned off
         if self.track is None and self.queue:
             self._play_index(0)
         self.changed.emit()
