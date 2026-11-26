@@ -7,6 +7,11 @@ if __name__ == "__main__":
         from kaguya.reader.__main__ import main as read_main
         i = sys.argv.index("--ler-arquivo")
         raise SystemExit(read_main(sys.argv[i + 1:]))
+    if "--baixar-modelo" in sys.argv[1:]:
+        # transcription model download in its own process (started by the Studio: progress, cancel, time limit)
+        from kaguya.voice.stt import main as model_main
+        i = sys.argv.index("--baixar-modelo")
+        raise SystemExit(model_main(sys.argv[i + 1:]))
     if "--mcp-browser" in sys.argv[1:]:
         # Kaguya Browser tools for Claude Code / Codex (stdio; forwards to the running Studio)
         from kaguya.browser.mcp import serve as serve_browser
