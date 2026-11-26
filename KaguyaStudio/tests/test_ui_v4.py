@@ -793,13 +793,15 @@ def _webengine():
         return False
 
 
-def _serve(routes: dict):
+def _serve(routes: dict, seen: list | None = None):
     """Tiny local web server; answers like a same-site server (credentials allowed for the requesting origin)."""
     import http.server
     import threading
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            if seen is not None:
+                seen.append((self.path, dict(self.headers)))
             ctype, body = routes.get(self.path.split("?")[0], ("text/plain", "404"))
             data = body.encode("utf-8")
             self.send_response(200 if self.path.split("?")[0] in routes else 404)
@@ -1335,3 +1337,93 @@ class FreezeFixesUi(UiBase):
         w.queue.b_cancel.click()
         self.assertTrue(self.pump(lambda: self.store.get_task(tid)["status"] == "cancelled", 10))
         self.assertFalse(self.engine.is_running(pid))
+
+
+@unittest.skipUnless(HAVE_QT and shutil.which("git") and _webengine(), "PySide6 WebEngine e git necessários")
+class BrowserPrivacyUi(UiBase):
+    def _wait(self, view, needle, timeout=20):
+        return self.pump(lambda: needle in view.url().toString() and not view.page().isLoading(), timeout)
+
+    def test_full_width_one_toolbar_drawer_and_fullscreen(self):
+        w = self.window()
+        w.go("browser")
+        page = w.browser
+        self.assertTrue(w.right.isHidden())                       # no side column: the site gets the room
+        self.assertTrue(w.project_bar.isHidden())
+        self.assertTrue(page.drawer.isHidden())                   # AI options only when asked for
+        page.ai_btn.click()
+        self.assertFalse(page.drawer.isHidden())
+        page.ai_btn.click()
+        self.assertTrue(page.drawer.isHidden())
+        w.set_browser_fullscreen(True)
+        self.assertTrue(w.side.isHidden() and w.header.isHidden())
+        w.go("chat")                                              # leaving the browser restores everything
+        self.assertFalse(w.side.isHidden() or w.header.isHidden() or w.right.isHidden() or w.project_bar.isHidden())
+        view = page._cur()
+        self.assertGreater(view.width(), 0)
+
+    def test_trackers_blocked_do_not_track_sent_and_security_shown(self):
+        w = self.window()
+        w.go("browser")
+        page = w.browser
+        seen, routes = [], {}
+        srv = _serve(routes, seen)                                # routes are read per request: filled below
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        port = srv.server_port
+        routes.update({"/a.html": ("text/html", f"<title>Loja</title><img src='http://localhost:{port}/pixel.gif'>"
+                                                f"<img src='http://127.0.0.1:{port}/logo.gif'>"),
+                       "/pixel.gif": ("image/gif", "x"), "/logo.gif": ("image/gif", "x")})
+        page._guard().extra_block.add("localhost")                # stands in for a tracker domain
+        view = page.open_url(f"http://127.0.0.1:{port}/a.html")
+        self.assertTrue(self._wait(view, "a.html"))
+        self.assertTrue(self.pump(lambda: any(p == "/logo.gif" for p, _h in seen), 10))
+        self.pump(lambda: False, 1)
+        paths = [p for p, _h in seen]
+        self.assertNotIn("/pixel.gif", paths)                     # the tracker request never left the browser
+        self.assertEqual(page.guard.blocked_for(view.url().toString()), 1)
+        self.assertEqual(page.shield_btn.text(), "1")
+        first = next(h for p, h in seen if p == "/a.html")
+        self.assertEqual(first.get("Sec-GPC"), "1")               # do-not-track signal on real requests
+        self.assertEqual(page.security_level, "local")            # http on 127.0.0.1 is the local network
+
+    def test_https_fallback_permissions_certificates_and_clear_data(self):
+        from unittest import mock
+        w = self.window()
+        w.go("browser")
+        page = w.browser
+        view = page._cur()
+        page._guard()
+        # a site without HTTPS: warning page, opening only after your click, only for that site
+        page._no_https_page(view, "http://exemplo.com/pagina")
+        page._internal(view.page(), "kaguya:permitir-http?u=http%3A%2F%2Fexemplo.com%2Fpagina")
+        self.assertIn("exemplo.com", page.guard.allowed_http)
+        # camera/microphone/location: asked; "no" denies
+        perm = mock.Mock()
+        perm.origin.return_value.host.return_value = "site.com"
+        perm.permissionType.return_value = mock.Mock(name="x")
+        perm.permissionType.return_value.name = "MediaVideoCapture"
+        page.confirm_hook = lambda text: ("a câmera" in text) and False
+        page._permission(view, perm)
+        perm.deny.assert_called_once()
+        perm.grant.assert_not_called()
+        # invalid certificate: rejected, shown in red, never continued in silence
+        err = mock.Mock()
+        err.description.return_value = "certificado expirado"
+        page._cert_error(view, err)
+        err.rejectCertificate.assert_called_once()
+        self.assertIn("certificado expirado", page.cert_errors[view.tab_id])
+        # clear browsing data
+        page.data.visit("https://exemplo.com", "Exemplo")
+        self.assertTrue(page.data.history(""))
+        page.confirm_hook = lambda text: True
+        self.assertTrue(page.clear_data())
+        self.assertEqual(page.data.history(""), [])
+        # settings dialog saves the switches
+        dlg = page.open_privacy()
+        dlg.t_trackers.setChecked(False)
+        next(b for b in dlg.dns_group.buttons() if b.property("key") == "quad9").setChecked(True)
+        dlg.save()
+        self.assertFalse(page.privacy.block_trackers)
+        self.assertEqual(self.store.get_setting("browser.privacy")["dns"], "quad9")
+        self.assertIn("Quad9", page.dns_status)

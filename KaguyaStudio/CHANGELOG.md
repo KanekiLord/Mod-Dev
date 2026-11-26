@@ -1,5 +1,29 @@
 # Changelog
 
+## 5.9.0 — 26/11/2026 (Kaguya Browser reorganizado e protegido)
+
+### Tela
+- O navegador usa a largura toda: sem o cartão do projeto e sem a coluna da direita enquanto você navega (em
+  1366×740 a área do site passou de ~830×370 para ~1140×590 px). **Tela cheia** com F11 (Esc sai).
+- Uma única linha de controles: voltar/avançar/recarregar/início, endereço com o **cadeado de segurança**, favorito,
+  escudo de proteção (mostra quantos rastreadores foram bloqueados), **IA** e o menu ⋮.
+- Tudo de IA (compartilhar a aba, deixar controlar, perguntar, linha do tempo) fica numa gaveta que só abre no botão
+  **IA**; o botão mostra quem vê a aba ("IA: Miwa vê"). Nenhuma função foi removida.
+- Menu ⋮: nova aba, aba anônima, tela cheia, privacidade e segurança, apagar dados, favoritos, histórico, mecanismo
+  de pesquisa. Atalhos: Ctrl+T, Ctrl+W, Ctrl+Shift+N, Ctrl+L, F5, F11.
+
+### Proteção (Privacidade e segurança — o que cada opção faz está explicado na própria janela)
+- **HTTPS sempre**: sites abrem com criptografia; se o site não tiver, aparece um aviso e ele só abre com o seu
+  clique (só aquele site, até fechar o Studio).
+- **Bloqueio de rastreadores conhecidos** (Google Analytics, pixels de anúncio, gravação de sessão…) e **cookies de
+  terceiros bloqueados**; sinal de "não rastrear" (GPC/DNT) em todas as requisições.
+- **DNS criptografado** (DNS over HTTPS) opcional: Quad9 ou Cloudflare.
+- Sempre ligados: certificado inválido bloqueia a página; câmera, microfone, localização, notificações e gravação
+  de tela sempre pedem permissão; WebRTC não expõe seus IPs locais; área de transferência fechada para os sites.
+- **Apagar dados de navegação** (histórico, cookies, logins, cache; favoritos ficam).
+- **VPN**: explicado com honestidade — o Studio não embute "VPN grátis" (seria um terceiro vendo tudo); o navegador
+  segue a VPN do Windows e aceita um proxy só para ele (vale após reiniciar).
+
 ## 5.8.1 — 26/11/2026 (correções do relatório de uso real)
 
 ### Corrigido — travamentos

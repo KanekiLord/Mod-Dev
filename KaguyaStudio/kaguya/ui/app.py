@@ -127,6 +127,14 @@ def main(argv=None) -> int:
     store = Store(home / "studio.sqlite3")
     store.recover_interrupted()
     dg.step(f"banco aberto em {home}")
+    try:   # optional proxy only for the Kaguya Browser (set before the web engine starts)
+        proxy = (store.get_setting("browser.privacy", {}) or {}).get("proxy", "")
+        if proxy and proxy.startswith(("socks5://", "socks4://", "http://", "https://")) and " " not in proxy:
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+                                                        + f" --proxy-server={proxy}").strip()
+            dg.step("navegador: usando o proxy configurado")
+    except Exception:
+        pass
     legacy = legacy_v3_database()
     if legacy and not store.get_setting("migration.v3.done") and not demo:
         try:

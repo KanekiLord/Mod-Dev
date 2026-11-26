@@ -233,7 +233,9 @@ class MainWindow(QMainWindow):
         cl = QVBoxLayout(center)
         cl.setContentsMargins(16, 14, 16, 14)
         cl.setSpacing(12)
-        cl.addWidget(self._project_bar())
+        self.project_bar = self._project_bar()
+        cl.addWidget(self.project_bar)
+        self.center_layout = cl
         self.stack = QStackedWidget()
         self.chat = ChatPage()
         self.queue = QueuePage(self)
@@ -502,9 +504,28 @@ class MainWindow(QMainWindow):
     def go(self, key: str):
         self.stack.setCurrentWidget(self.pages[key])
         self.nav_buttons[key].setChecked(True)
+        # the browser gets the whole width (no project card, no side column): sites need room to be readable
+        browsing = key == "browser"
+        self.project_bar.setVisible(not browsing)
+        self.right.setVisible(not browsing)
+        self.center_layout.setContentsMargins(*((8, 8, 8, 8) if browsing else (16, 14, 16, 14)))
+        if not browsing and getattr(self, "browser_fullscreen", False):
+            self.set_browser_fullscreen(False)
         page = self.pages[key]
         if hasattr(page, "refresh"):
             page.refresh()
+
+    def set_browser_fullscreen(self, on: bool):
+        """F11 in the browser: only the page (Esc or F11 to leave)."""
+        self.browser_fullscreen = bool(on)
+        self.side.setVisible(not on)
+        self.header.setVisible(not on)
+        if on:
+            self._was_maximized = self.isMaximized()
+            self.showFullScreen()
+            self.toast("Tela cheia: F11 ou Esc para sair.", 2500)
+        else:
+            self.showMaximized() if getattr(self, "_was_maximized", False) else self.showNormal()
 
     def bring_to_front(self):
         self.showNormal()

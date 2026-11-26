@@ -20,6 +20,7 @@ from ..browser import youtube as yt
 from ..browser.data import HOME, SEARCH, BrowserData, to_url
 from ..browser.share import NAMES, AccessDenied, ShareRegistry
 from .page_webchats import webengine_available
+from . import theme
 from .theme import AGENT, C
 from .widgets import Card, button, label
 
@@ -81,16 +82,23 @@ class BrowserPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        # toolbar
+        from ..browser import privacy
+        self.privacy = privacy.Settings.load(win.store)
+        self.guard = None                 # request guard (HTTPS, trackers), created with the first profile
+        self.cert_errors: dict[int, str] = {}
+        # ---- one toolbar row: navigation · address (with security) · favourite · protection · AI · menu
         bar = QHBoxLayout()
-        bar.setSpacing(6)
-        self.back_btn = button("", "skip-back", "ghost", "Voltar")
-        self.fwd_btn = button("", "skip-forward", "ghost", "Avançar")
-        self.reload_btn = button("", "refresh", "ghost", "Recarregar")
+        bar.setSpacing(4)
+        self.back_btn = button("", "skip-back", "ghost", "Voltar (Alt+←)")
+        self.fwd_btn = button("", "skip-forward", "ghost", "Avançar (Alt+→)")
+        self.reload_btn = button("", "refresh", "ghost", "Recarregar (F5)")
         self.home_btn = button("", "home", "ghost", "Página inicial")
         self.address = QLineEdit()
+        self.address.setObjectName("browserAddress")
         self.address.setPlaceholderText("Pesquisar ou digitar endereço")
         self.address.returnPressed.connect(lambda: self.open_url(self.address.text()))
+        self.sec_action = self.address.addAction(theme.icon("lock", C["muted"]), QLineEdit.LeadingPosition)
+        self.sec_action.triggered.connect(self.open_privacy)
         self.completer = QCompleter([])
         self.completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.completer.setFilterMode(Qt.MatchContains)
@@ -98,10 +106,16 @@ class BrowserPage(QWidget):
         self.address.textEdited.connect(lambda t: self.completer.model().setStringList(self.data.suggestions(t)))
         self.star = button("☆", None, "ghost", "Adicionar/remover dos favoritos", checkable=True)
         self.star.clicked.connect(self.toggle_favorite)
-        self.menu_btn = button("Favoritos", "list", "ghost", "Favoritos, histórico e mecanismo de pesquisa")
+        self.shield_btn = button("", "shield", "ghost", "Proteção e privacidade desta página")
+        self.shield_btn.clicked.connect(self.open_privacy)
+        self.ai_btn = button("IA", "sparkle", "ghost", "Compartilhar esta aba com a Kaguya/Miwa e perguntar sobre ela",
+                             checkable=True)
+        self.ai_btn.toggled.connect(self._toggle_drawer)
+        self.menu_btn = button("", "more", "ghost", "Favoritos, histórico, abas anônimas, privacidade e tela cheia")
         self.menu = QMenu(self.menu_btn)
         self.menu.aboutToShow.connect(self._fill_menu)
         self.menu_btn.setMenu(self.menu)
+        self.menu_btn.setStyleSheet("QPushButton::menu-indicator { image: none; width: 0; }")
         self.back_btn.clicked.connect(lambda: self._cur() and self._cur().back())
         self.fwd_btn.clicked.connect(lambda: self._cur() and self._cur().forward())
         self.reload_btn.clicked.connect(lambda: self._cur() and self._cur().reload())
@@ -109,53 +123,57 @@ class BrowserPage(QWidget):
         for w in (self.back_btn, self.fwd_btn, self.reload_btn, self.home_btn):
             bar.addWidget(w)
         bar.addWidget(self.address, 1)
-        bar.addWidget(self.star)
-        bar.addWidget(self.menu_btn)
+        for w in (self.star, self.shield_btn, self.ai_btn, self.menu_btn):
+            bar.addWidget(w)
         lay.addLayout(bar)
-        # sharing strip
-        strip = QHBoxLayout()
-        strip.setSpacing(6)
-        self.share_label = label("", "dim")
+        # ---- AI drawer (hidden until you click "IA"): sharing, control, question, timeline
+        self.drawer = QFrame()
+        self.drawer.setObjectName("aiDrawer")
+        self.drawer.setStyleSheet(f"#aiDrawer {{ background: {C['surface']}; border: 1px solid {C['border']};"
+                                  f" border-radius: 10px; }}")
+        dl = QVBoxLayout(self.drawer)
+        dl.setContentsMargins(10, 8, 10, 8)
+        dl.setSpacing(6)
+        self.share_label = label("", "dim", wrap=True)
         self.share_btns = {}
         for a in ("codex", "claude"):
-            b = button(AGENT[a]['mascot'], a, "chip", checkable=True,
+            b = button(f"{AGENT[a]['mascot']} vê", a, "chip", checkable=True,
                        tip=f"{AGENT[a]['mascot']} passa a poder ler ESTA aba quando você perguntar algo")
             b.clicked.connect(lambda on, a=a: self.set_share(a, on))
             self.share_btns[a] = b
         self.control_btns = {}
         for a in ("codex", "claude"):
-            b = button(AGENT[a]['mascot'], "window", "chip", checkable=True,
+            b = button(f"{AGENT[a]['mascot']} controla", "window", "chip", checkable=True,
                        tip=f"Controle supervisionado: {AGENT[a]['mascot']} pode rolar, clicar e digitar SÓ nesta aba "
                            "(nunca senhas; compras/envios/logins pedem sua confirmação). Você assume quando quiser.")
             b.clicked.connect(lambda on, a=a: self.set_control(a, on))
             self.control_btns[a] = b
         self.timeline_btn = button("Linha do tempo", "clock", "ghost", "Quem acessou esta aba e quando", checkable=True)
         self.timeline_btn.clicked.connect(lambda on: self.timeline.setVisible(on))
-        lay.addWidget(self.share_label)   # status on its own line (never cut)
-        strip.addWidget(label("Compartilhar com:", "dim"))
-        for b in self.share_btns.values():
-            strip.addWidget(b)
-        strip.addSpacing(14)
-        strip.addWidget(label("Pode controlar:", "dim"))
-        for b in self.control_btns.values():
+        strip = QHBoxLayout()
+        strip.setSpacing(6)
+        strip.addWidget(label("Esta aba:", "dim"))
+        for b in (*self.share_btns.values(), *self.control_btns.values()):
             strip.addWidget(b)
         strip.addStretch(1)
         strip.addWidget(self.timeline_btn)
-        lay.addLayout(strip)
-        # ask strip
+        dl.addLayout(strip)
         ask = QHBoxLayout()
         self.ask_agent = QComboBox()
         for a in ("claude", "codex"):
             self.ask_agent.addItem(AGENT[a]["mascot"], a)
         self.ask_edit = QLineEdit()
-        self.ask_edit.setPlaceholderText("Pergunte sobre esta aba (ex.: resuma; o que muda na versão 1.20?; explique o trecho selecionado)")
+        self.ask_edit.setPlaceholderText("Pergunte sobre esta aba (ex.: resuma; o que muda na versão 1.20?)")
         self.ask_edit.returnPressed.connect(lambda: self.ask(self.ask_agent.currentData(), self.ask_edit.text()))
         self.ask_btn = button("Perguntar", "send", "primary")
         self.ask_btn.clicked.connect(lambda: self.ask(self.ask_agent.currentData(), self.ask_edit.text()))
         ask.addWidget(self.ask_agent)
         ask.addWidget(self.ask_edit, 1)
         ask.addWidget(self.ask_btn)
-        lay.addLayout(ask)
+        dl.addLayout(ask)
+        dl.addWidget(self.share_label)
+        self.drawer.hide()
+        lay.addWidget(self.drawer)
         # body: tabs | side panel
         self.split = QSplitter(Qt.Horizontal)
         left = QWidget()
@@ -185,7 +203,7 @@ class BrowserPage(QWidget):
         self.priv_btn = button("Anônima", "eye", "ghost", "Nova aba anônima: não grava histórico nem login")
         self.priv_btn.clicked.connect(lambda: self.new_tab(HOME, private=True))
         cl.addWidget(self.new_btn)
-        cl.addWidget(self.priv_btn)
+        self.priv_btn.hide()           # moved to the ⋮ menu (Nova aba anônima, Ctrl+Shift+N)
         self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
         self.banner = QFrame()
         self.banner.setObjectName("controlBanner")
@@ -275,8 +293,18 @@ class BrowserPage(QWidget):
                 prof.setCachePath(str(base / "cache"))
                 prof.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
             prof.downloadRequested.connect(self._download)
+            from .browser_guard import harden
+            harden(prof, self._guard(), self.privacy)
             self._profiles[key] = prof
         return self._profiles[key]
+
+    def _guard(self):
+        if self.guard is None:
+            from .browser_guard import Guard, apply_dns
+            self.guard = Guard(self.privacy, self)
+            self.guard.blocked.connect(lambda _site, _n: self._sync_security())
+            self.dns_status = apply_dns(self.privacy)
+        return self.guard
 
     def new_tab(self, url: str = HOME, private: bool = False, select: bool = True, owner: str = ""):
         from PySide6.QtWebEngineCore import QWebEnginePage
@@ -289,12 +317,21 @@ class BrowserPage(QWidget):
             def createWindow(self, _type):   # target=_blank / window.open → new tab with the same privacy
                 return studio.new_tab("about:blank", private=private, owner=owner).page()
 
+            def acceptNavigationRequest(self, url, _type, is_main):   # noqa: N802 (Qt name)
+                if url.scheme() == "kaguya":
+                    studio._internal(self, url.toString())
+                    return False
+                return super().acceptNavigationRequest(url, _type, is_main)
+
         frame = QFrame()
         frame.setObjectName("browserFrame")
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(2, 2, 2, 2)
         view = QWebEngineView(frame)
-        view.setPage(Page(self._profile(private, agents=bool(owner)), view))
+        page = Page(self._profile(private, agents=bool(owner)), view)
+        view.setPage(page)
+        page.permissionRequested.connect(lambda perm, v=view: self._permission(v, perm))
+        page.certificateError.connect(lambda err, v=view: self._cert_error(v, err))
         view.tab_id, view.private, view.frame = tab_id, private or bool(owner), frame
         if owner:   # research tab of an assistant: isolated profile, shared with and controlled by it, visible to you
             self.shares.tab(tab_id).owner = owner
@@ -381,6 +418,11 @@ class BrowserPage(QWidget):
                 self.side.hide()
 
     def _loaded(self, view, ok: bool):
+        url = view.url().toString()
+        h = __import__("kaguya.browser.privacy", fromlist=["x"]).host(url)
+        if (not ok and url.startswith("https://") and self.guard is not None and h in self.guard.upgraded
+                and h not in self.guard.allowed_http and view.tab_id not in self.cert_errors):
+            self._no_https_page(view, "http://" + url[len("https://"):])
         self._title(view)
         if view is self._cur():
             self._sync()
@@ -427,6 +469,10 @@ class BrowserPage(QWidget):
             self.banner.show()
         else:
             self.banner.hide()
+        self.ai_btn.setText(("IA: " + " e ".join(NAMES[a] for a in sorted(t.readers)) + " veem") if len(t.readers) > 1
+                            else f"IA: {NAMES[next(iter(t.readers))]} vê" if t.readers else "IA")
+        self.ai_btn.setStyleSheet(f"color: {C['gold']};" if t.readers else "")
+        self._sync_security()
         if t.readers:
             who = " e ".join(f"{NAMES[a]} (desde {t.since.get(a, '')})" for a in sorted(t.readers))
             self.share_label.setText(f"Esta aba está compartilhada com {who}.")
@@ -447,6 +493,141 @@ class BrowserPage(QWidget):
         self.side.setVisible(rep is not None)
         if rep is not None:
             self._show_report(rep)
+
+    # ------------------------------------------------------------ privacy & security
+    def _toggle_drawer(self, on: bool):
+        self.drawer.setVisible(on)
+        if on:
+            self.ask_edit.setFocus()
+
+    def _sync_security(self):
+        from ..browser import privacy
+        v = self._cur()
+        if v is None:
+            return
+        url = v.url().toString()
+        level, text = privacy.security_of(url, v.tab_id in self.cert_errors)
+        if v.tab_id in self.cert_errors:
+            text += f" — {self.cert_errors[v.tab_id]}"
+        color = {"seguro": C["success"], "inseguro": C["danger"], "local": C["info"], "interno": C["muted"]}[level]
+        self.sec_action.setIcon(theme.icon("lock" if level == "seguro" else "alert" if level == "inseguro" else "home",
+                                           color))
+        self.sec_action.setToolTip(text + " — clique para ver a proteção desta página")
+        n = self.guard.blocked_for(url) if self.guard is not None else 0
+        self.shield_btn.setText(str(n) if n else "")
+        self.shield_btn.setToolTip(f"{n} rastreador(es) bloqueado(s) neste site. Clique para ver a proteção."
+                                   if n else "Proteção e privacidade desta página")
+        self.security_level = level
+
+    def open_privacy(self):
+        from .browser_privacy import PrivacyDialog
+        dlg = PrivacyDialog(self)
+        self._dialogs.append(dlg)
+        dlg.finished.connect(lambda _r: self._dialogs.remove(dlg) if dlg in self._dialogs else None)
+        dlg.open()
+        return dlg
+
+    def apply_privacy(self):
+        """Settings changed in the dialog: saved and in effect for the next requests (DNS for new lookups)."""
+        self.privacy.save(self.win.store)
+        if self.guard is not None:
+            self.guard.settings = self.privacy
+            from .browser_guard import apply_dns, harden
+            self.dns_status = apply_dns(self.privacy)
+            for prof in self._profiles.values():
+                harden(prof, self.guard, self.privacy)
+        self._sync_security()
+
+    def clear_data(self, confirm: bool = True) -> bool:
+        if confirm and not self._confirm("Apagar histórico, cookies, logins salvos e cache do Kaguya Browser?\n"
+                                         "Você vai precisar entrar de novo nos sites. Favoritos são mantidos."):
+            return False
+        self.data.clear_history()
+        for prof in self._profiles.values():
+            prof.cookieStore().deleteAllCookies()
+            prof.clearHttpCache()
+            try:
+                prof.clearAllVisitedLinks()
+            except Exception:
+                pass
+        self.win.toast("Dados de navegação apagados.")
+        return True
+
+    def _confirm(self, text: str) -> bool:
+        if self.confirm_hook is not None:
+            return bool(self.confirm_hook(text))
+        return QMessageBox.question(self, "Kaguya Browser", text) == QMessageBox.Yes
+
+    def _permission(self, view, perm):
+        from .browser_guard import permission_text
+        what = permission_text(perm.permissionType())
+        site = perm.origin().host() or perm.origin().toString()
+        if self._confirm(f"O site {site} quer usar {what}.\n\nPermitir só para este site?"):
+            perm.grant()
+            self.win.toast(f"{site}: permitido usar {what}.")
+        else:
+            perm.deny()
+
+    def _cert_error(self, view, err):
+        # never "continue anyway" in silence: the page is blocked and the reason is shown
+        self.cert_errors[view.tab_id] = err.description()
+        try:
+            err.rejectCertificate()
+        except Exception:
+            pass
+        if view is self._cur():
+            self._sync_security()
+        self.win.toast("Página bloqueada: certificado de segurança inválido (" + err.description()[:120] + ").")
+
+    def _no_https_page(self, view, http_url: str):
+        from html import escape
+        from urllib.parse import quote
+        h = escape(__import__("kaguya.browser.privacy", fromlist=["x"]).host(http_url))
+        html = (f"<html><body style='background:#17121f;color:#eee;font-family:Segoe UI,sans-serif;padding:60px'>"
+                f"<h2 style='color:#f0c674'>Este site não oferece conexão segura</h2>"
+                f"<p>{h} não respondeu com HTTPS (criptografia). Sem ela, quem está na mesma rede (Wi-Fi, provedor) "
+                f"pode ver e alterar o que você vê e digita.</p><p>Não digite senhas nem dados pessoais nele.</p>"
+                f"<p><a style='color:#f0c674' href='kaguya:permitir-http?u={quote(http_url, safe='')}'>"
+                f"Abrir mesmo assim, sem criptografia (só este site, até fechar o Studio)</a></p>"
+                f"<p><a style='color:#aaa' href='kaguya:voltar'>Voltar</a></p></body></html>")
+        view.setHtml(html, QUrl("about:blank"))
+
+    def _internal(self, page, url: str):
+        from urllib.parse import parse_qs, unquote, urlsplit
+        view = next((v for v in self.views.values() if v.page() is page), None)
+        if view is None:
+            return
+        if url.startswith("kaguya:permitir-http"):
+            target = unquote(parse_qs(urlsplit(url).query).get("u", [""])[0])
+            from ..browser import privacy
+            if self.guard is not None and target.startswith("http://"):
+                self.guard.allowed_http.add(privacy.host(target))
+                view.load(QUrl(target))
+        elif url.startswith("kaguya:voltar"):
+            view.back() if view.history().canGoBack() else self._navigate(view, HOME)
+
+    def toggle_fullscreen(self):
+        self.win.set_browser_fullscreen(not getattr(self.win, "browser_fullscreen", False))
+
+    def keyPressEvent(self, e):   # noqa: N802 (Qt name)
+        from PySide6.QtGui import QKeySequence
+        k, mod = e.key(), e.modifiers()
+        ctrl = bool(mod & Qt.ControlModifier)
+        if k == Qt.Key_F11 or (k == Qt.Key_Escape and getattr(self.win, "browser_fullscreen", False)):
+            self.toggle_fullscreen() if k == Qt.Key_F11 else self.win.set_browser_fullscreen(False)
+        elif ctrl and k == Qt.Key_T:
+            self.new_tab(HOME)
+        elif ctrl and mod & Qt.ShiftModifier and k == Qt.Key_N:
+            self.new_tab(HOME, private=True)
+        elif ctrl and k == Qt.Key_W and self.tabs.count():
+            self.close_tab(self.tabs.currentIndex())
+        elif (ctrl and k == Qt.Key_L) or k == Qt.Key_F6:
+            self.address.setFocus()
+            self.address.selectAll()
+        elif k == Qt.Key_F5 and self._cur():
+            self._cur().reload()
+        else:
+            super().keyPressEvent(e)
 
     def _share_changed(self, tab_id: int):
         view = self.views.get(tab_id)
@@ -612,6 +793,15 @@ class BrowserPage(QWidget):
 
     def _fill_menu(self):
         self.menu.clear()
+        self.menu.addAction("Nova aba\tCtrl+T", lambda: self.new_tab(HOME))
+        self.menu.addAction("Nova aba anônima\tCtrl+Shift+N", lambda: self.new_tab(HOME, private=True))
+        self.menu.addAction(("Sair da tela cheia" if getattr(self.win, "browser_fullscreen", False) else "Tela cheia")
+                            + "\tF11", self.toggle_fullscreen)
+        self.menu.addSeparator()
+        self.menu.addAction("Privacidade e segurança…", self.open_privacy)
+        self.menu.addAction("Apagar dados de navegação…", self.clear_data)
+        self.menu.addSeparator()
+        self.menu.addSection("Favoritos")
         favs = self.data.favorites()
         for f in favs[:40]:
             self.menu.addAction(f["title"][:60], lambda u=f["url"]: self.open_url(u))
